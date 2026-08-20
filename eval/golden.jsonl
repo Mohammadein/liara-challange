@@ -1,8 +1,35 @@
-{"q": "نسخه پایتون برنامه رو کجا تعیین کنم؟", "expect_url": "https://docs.liara.ir/paas/django/how-tos/deploy-app/", "type": "simple"}
-{"q": "baseUrl سرویس هوش مصنوعی لیارا چیه؟", "expect_url": "https://docs.liara.ir/ai/quick-start/", "type": "simple"}
-{"q": "چطور با CLI برنامه رو دیپلوی کنم؟", "expect_url": "https://docs.liara.ir/references/cli/deploy-app/", "type": "simple"}
-{"q": "میرور npm لیارا رو چطور تنظیم کنم؟", "expect_url": "https://docs.liara.ir/mirrors/npm/", "type": "simple"}
-{"q": "چطور به تیمم عضو اضافه کنم؟", "expect_url": "https://docs.liara.ir/references/team/invite-members/", "type": "simple"}
-{"q": "پکیج‌هام موقع دیپلوی نصب نمی‌شن، چیکار کنم؟", "expect_url": "https://docs.liara.ir/paas/django/how-tos/deploy-app/", "type": "complex"}
-{"q": "می‌خوام سایتم رو بالا بیارم", "expect_url": null, "type": "ambiguous", "note": "باید بپرسد چه پلتفرمی و با چه روشی"}
-{"q": "دیپلوی کنم", "expect_url": null, "type": "ambiguous", "note": "باید سؤال تکمیلی بپرسد"}
+{"q": "نسخه پایتون برنامه رو کجا تعیین کنم؟", "expect": "/paas/python/how-tos/choose-version/", "type": "simple"}
+{"q": "چطور برنامه جنگو رو با CLI دیپلوی کنم؟", "expect": "/paas/django/how-tos/deploy-app/", "type": "simple"}
+{"q": "فایل liara.json چه فیلدهایی داره؟", "expect": "/paas/liarajson/", "type": "simple"}
+{"q": "baseUrl سرویس هوش مصنوعی لیارا رو از کجا بردارم؟", "expect": "/ai/quick-start/", "type": "simple"}
+{"q": "برای FastAPI از کدوم پلتفرم استفاده کنم؟", "expect": "/paas/python/related-apps/fastapi/", "type": "simple"}
+{"q": "میرور npm لیارا رو چطور تنظیم کنم؟", "expect": "/mirrors/npm/", "type": "simple"}
+{"q": "آدرس میرور pypi لیارا چیه؟", "expect": "/mirrors/pypi/", "type": "simple"}
+{"q": "نصب liara cli", "expect": "/references/cli/install/", "type": "simple"}
+{"q": "چطور به تیمم عضو جدید دعوت کنم؟", "expect": "/references/team/invite-members/", "type": "simple"}
+{"q": "متغیر محیطی رو با خط فرمان چطور اضافه کنم؟", "expect": "/references/cli/add-or-edit-envs/", "type": "simple"}
+{"q": "لاگ‌های برنامه‌م رو چطور ببینم؟", "expect": "/references/cli/see-app-logs/", "type": "simple"}
+{"q": "شارژ حساب لیارا", "expect": "/references/console/increase-credit/", "type": "simple"}
+{"q": "احراز هویت دو مرحله‌ای رو فعال کنم", "expect": "/references/console/enable-two-factor-authentication/", "type": "simple"}
+{"q": "باکت object storage بسازم", "expect": "/object-storage/quick-setup/", "type": "simple"}
+{"q": "کلید API هوش مصنوعی رو کجا بسازم؟", "expect": "/ai/details/keys/", "type": "simple"}
+{"q": "دیتاسنترهای لیارا کجاها هستن؟", "expect": "/overview/data-centers/", "type": "simple"}
+{"q": "راه‌اندازی سرور ایمیل", "expect": "/email-server/quick-setup/", "type": "simple"}
+{"q": "پکیج‌هام موقع دیپلوی نصب نمی‌شن و بیلد خطا می‌ده", "expect": "/paas/django/how-tos/deploy-app/", "type": "complex", "note": "باید به بخش mirror برسد"}
+{"q": "برنامه‌م بعد از چند ثانیه تایم‌اوت می‌خوره", "expect": "/paas/python/fix-common-errors/worker-timeout/", "type": "complex"}
+{"q": "آپلود فایل بزرگ رد می‌شه، محدودیت حجم رو چطور زیاد کنم؟", "expect": "/paas/python/fix-common-errors/upload-limit-size/", "type": "complex"}
+{"q": "از مرورگر به API‌م ریکوئست می‌زنم ولی بلاک می‌شه", "expect": "/paas/python/fix-common-errors/cors/", "type": "complex", "note": "کاربر کلمه CORS را نمی‌داند"}
+{"q": "می‌خوام فایل‌هام بعد از ری‌استارت پاک نشن", "expect": "/paas/python/how-tos/use-disk/", "type": "complex", "note": "مفهوم دیسک را نام نمی‌برد"}
+{"q": "یه کاری رو هر روز ساعت ۳ صبح اجرا کنم", "expect": "/paas/python/how-tos/set-cron-job/", "type": "complex"}
+{"q": "چت زنده می‌خوام پیاده کنم، اتصال دائم لازم دارم", "expect": "/paas/python/how-tos/use-websocket/", "type": "complex"}
+{"q": "چند تا ورکر برای برنامه‌م بذارم؟", "expect": "/paas/python/how-tos/set-gunicorn-workers/", "type": "complex"}
+{"q": "می‌خوام بدونم آخر ماه چقدر باید پول بدم", "expect": "/references/console/cost-estimation/", "type": "complex"}
+{"q": "دیتابیسم رو از یه سرویس به سرویس دیگه منتقل کنم", "expect": "/dbaas/move/", "type": "complex"}
+{"q": "می‌خوام هوش مصنوعی لیارا رو به n8n وصل کنم", "expect": "/ai/connect-to-service/n8n/", "type": "complex"}
+{"q": "با داکر کامپوز چطور دیپلوی کنم؟", "expect": "/paas/docker/how-tos/deploy-docker-compose/", "type": "complex"}
+{"q": "دامنه اختصاصی روی باکتم بذارم", "expect": "/object-storage/add-domain/", "type": "complex"}
+{"q": "می‌خوام سایتم رو بالا بیارم", "expect": null, "type": "ambiguous", "note": "چه پلتفرمی؟ با چه روشی؟"}
+{"q": "دیپلوی کنم", "expect": null, "type": "ambiguous", "note": "باید سؤال تکمیلی بپرسد"}
+{"q": "قیمتش چنده؟", "expect": null, "type": "ambiguous", "note": "قیمت کدام سرویس؟"}
+{"q": "کار نمی‌کنه", "expect": null, "type": "ambiguous", "note": "هیچ اطلاعاتی ندارد"}
+{"q": "بهترین گزینه برای پروژه من چیه؟", "expect": null, "type": "ambiguous", "note": "باید درباره پروژه بپرسد"}
