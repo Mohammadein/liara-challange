@@ -24,6 +24,17 @@ GOLDEN = Path(__file__).parent / "golden.jsonl"
 KS = (1, 3, 5, 10)
 
 
+def page_stem(url: str) -> str:
+    """
+    آخرین بخش مسیر، بدون anchor.
+
+    مستندات لیارا برای هر پلتفرم یک نسخه از همان صفحه دارند
+    (set-cron-job زیر python و nodejs و django). وقتی کاربر پلتفرمش را
+    نگفته، هر کدام جواب درستی است — پس سنجش صفحه‌محور معیار منصفانه‌تری است.
+    """
+    return url.split("#")[0].rstrip("/").rsplit("/", 1)[-1]
+
+
 def load_golden() -> list[dict]:
     rows = []
     with GOLDEN.open(encoding="utf-8") as f:
@@ -76,33 +87,37 @@ def main() -> None:
     print(f"روش بازیابی : {label}")
     print(f"سؤالات      : {len(rows)} سنجش‌پذیر + {ambiguous} مبهم (اینجا سنجیده نمی‌شوند)\n")
 
-    hits = {k: 0 for k in KS}
+    strict = {k: 0 for k in KS}
+    loose = {k: 0 for k in KS}
     by_type: dict[str, list[int]] = {}
     failures = []
 
     for row in rows:
         results = search(row["q"], max(KS))
         urls = [c.url for c in results]
-        rank = next(
-            (i + 1 for i, u in enumerate(urls) if row["expect"] in u), None
-        )
+
+        r_strict = next((i + 1 for i, u in enumerate(urls) if row["expect"] in u), None)
+        stem = page_stem(row["expect"])
+        r_loose = next((i + 1 for i, u in enumerate(urls) if page_stem(u) == stem), None)
 
         for k in KS:
-            if rank and rank <= k:
-                hits[k] += 1
+            strict[k] += bool(r_strict and r_strict <= k)
+            loose[k] += bool(r_loose and r_loose <= k)
 
-        by_type.setdefault(row["type"], []).append(1 if rank and rank <= 5 else 0)
+        by_type.setdefault(row["type"], []).append(bool(r_loose and r_loose <= 5))
 
-        if not rank or rank > 5:
+        if not r_loose or r_loose > 5:
             failures.append((row, urls[:3]))
 
     n = len(rows)
-    print("Recall:")
+    print("Recall  (دقیق = همان مسیر | صفحه‌محور = همان صفحه، هر پلتفرمی)")
+    print(f"{'':6}{'دقیق':>12}{'صفحه‌محور':>14}")
     for k in KS:
-        bar = "█" * (hits[k] * 30 // max(n, 1))
-        print(f"  @{k:<3} {hits[k]:>2}/{n}  {hits[k] * 100 // n:>3}%  {bar}")
+        bar = "█" * (loose[k] * 24 // max(n, 1))
+        print(f"  @{k:<3}{strict[k]:>6}/{n} {strict[k] * 100 // n:>3}%"
+              f"{loose[k]:>8}/{n} {loose[k] * 100 // n:>3}%  {bar}")
 
-    print("\nبه تفکیک نوع سؤال (Recall@5):")
+    print("\nبه تفکیک نوع سؤال (صفحه‌محور @5):")
     for t, vals in by_type.items():
         print(f"  {t:<10} {sum(vals)}/{len(vals)}  {sum(vals) * 100 // len(vals)}%")
 
