@@ -25,6 +25,30 @@ _FENCE = re.compile(r"(```.*?```)", re.DOTALL)
 
 # --------------------------------------------------------------- شکستن
 
+def _step_split(text: str) -> list[str]:
+    """
+    صفحات «راه‌اندازی سریع» را روی مرز «مرحله N:» می‌شکند.
+
+    این صفحات هیچ <Section> ندارند و معمولاً از سقف هم کوچک‌ترند، پس نه برش
+    می‌خوردند نه شکسته می‌شدند و کل صفحه یک تکه می‌شد. وکتور چنین تکه‌ای
+    «میانگین ورود، انتخاب حساب، ساخت سرویس، ساخت کلید و baseUrl» است و به
+    هیچ سؤال مشخصی نزدیک نیست.
+
+    نتیجه‌ی واقعی این باگ: هم «baseUrl سرویس هوش مصنوعی» و هم «ساخت باکت»
+    پاسخ «در مستندات نیست» می‌گرفتند، در حالی که هر دو در مستندات بودند.
+    """
+    parts = re.split(r"\n(?=مرحله\s+\S+\s*:)", text)
+    if len(parts) < 3:
+        return [text]
+
+    # مقدمه‌ی قبل از مرحله‌ی اول به مرحله‌ی اول می‌چسبد تا آویزان نماند
+    if not parts[0].lstrip().startswith("مرحله"):
+        intro = parts.pop(0).strip()
+        if intro:
+            parts[0] = f"{intro}\n{parts[0]}"
+    return [p.strip() for p in parts if p.strip()]
+
+
 def _atoms(text: str) -> list[str]:
     """
     متن را به واحدهای اتمی می‌شکند: پاراگراف‌ها و بلوک‌های کد.
@@ -61,6 +85,13 @@ def _hard_split(s: str, limit: int) -> list[str]:
 
 def _pack(text: str) -> list[str]:
     """واحدها را حریصانه تا رسیدن به اندازه هدف کنار هم می‌چیند."""
+    steps = _step_split(text)
+    if len(steps) > 1:
+        return [p for s in steps for p in _pack_one(s)]
+    return _pack_one(text)
+
+
+def _pack_one(text: str) -> list[str]:
     if len(text) <= MAX_CHUNK_CHARS:
         return [text]
 
