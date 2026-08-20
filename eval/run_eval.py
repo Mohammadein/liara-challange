@@ -21,7 +21,9 @@ import sys
 from pathlib import Path
 
 GOLDEN = Path(__file__).parent / "golden.jsonl"
-KS = (1, 3, 5, 10)
+# نقاط گزارش. ۸ عمداً هست چون TOP_K محصول ۸ است — سنجیدن روی ۵ یعنی
+# جریمه کردن سندی که در رتبه ۷ است و مدل واقعاً آن را می‌بیند.
+KS = (1, 3, 8, 10)
 
 
 def page_stem(url: str) -> str:
