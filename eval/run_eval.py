@@ -182,13 +182,23 @@ def main() -> None:
     failures = []
 
     for row in rows:
-        query = rewritten.get(row["q"], row["q"])
+        rq = rewritten.get(row["q"])
+        # مثل محصول: هم سؤال خام هم بازنویسی‌شده
+        query = [row["q"], rq] if rq and rq != row["q"] else row["q"]
         results = search(query, max(KS))
         urls = [c.url for c in results]
 
-        r_strict = next((i + 1 for i, u in enumerate(urls) if row["expect"] in u), None)
-        stem = page_stem(row["expect"])
-        r_loose = next((i + 1 for i, u in enumerate(urls) if page_stem(u) == stem), None)
+        # expect می‌تواند رشته یا لیست باشد: بعضی سؤالات بیش از یک پاسخ
+        # درست دارند (مثلاً هم paas/disks/about هم paas/python/how-tos/use-disk)
+        expects = row["expect"] if isinstance(row["expect"], list) else [row["expect"]]
+        stems = {page_stem(e) for e in expects}
+
+        r_strict = next(
+            (i + 1 for i, u in enumerate(urls) if any(e in u for e in expects)), None
+        )
+        r_loose = next(
+            (i + 1 for i, u in enumerate(urls) if page_stem(u) in stems), None
+        )
 
         for k in KS:
             strict[k] += bool(r_strict and r_strict <= k)

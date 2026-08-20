@@ -136,7 +136,7 @@ class Retriever:
 
     def search(
         self,
-        query: str,
+        query: str | list[str],
         k: int | None = None,
         *,
         mode: str = "hybrid",
@@ -155,13 +155,27 @@ class Retriever:
         k = k or settings.top_k
         pool = max(k * pool_factor, 20)
 
-        if mode == "dense":
-            ranked, w = [self._dense(query, pool)], [1.0]
-        elif mode == "bm25":
-            ranked, w = [self._sparse(query, pool)], [1.0]
-        else:
-            ranked = [self._dense(query, pool), self._sparse(query, pool)]
-            w = list(weights)
+        # چند کوئری (سؤال خام + بازنویسی‌شده) با هم ترکیب می‌شوند.
+        #
+        # بازنویسی گاهی اطلاعات را از دست می‌دهد: «میرور npm» به
+        # «تنظیم mirror npm» تبدیل شد و ناگهان با anchorهای
+        # liara-json-mirror در صفحات deploy-app تطابق پیدا کرد — سؤالی که
+        # قبل از بازنویسی درست کار می‌کرد. جستجوی هر دو، بازنویسی را از
+        # «جایگزینی» به «غنی‌سازی» تبدیل می‌کند.
+        queries = [query] if isinstance(query, str) else [q for q in query if q]
+        queries = list(dict.fromkeys(queries)) or [""]
+
+        ranked: list[list[int]] = []
+        w: list[float] = []
+        for i, q in enumerate(queries):
+            # کوئری اول (سؤال خام کاربر) وزن کامل؛ بقیه کمی کمتر
+            qw = 1.0 if i == 0 else 0.85
+            if mode in ("dense", "hybrid"):
+                ranked.append(self._dense(q, pool))
+                w.append(weights[0] * qw)
+            if mode in ("bm25", "hybrid"):
+                ranked.append(self._sparse(q, pool))
+                w.append(weights[1] * qw)
 
         scores = _rrf(ranked, w, rrf_k)
 

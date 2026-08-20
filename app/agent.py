@@ -194,7 +194,7 @@ async def answer_once(
     service = plan["service"] or session.service
 
     retriever = get_retriever()
-    hits = retriever.search(query, k=k or settings.top_k, service=service)
+    hits = retriever.search([question, query], k=k or settings.top_k, service=service)
 
     resp = await aclient().chat.completions.create(
         model=settings.model_answer,
@@ -259,7 +259,10 @@ async def chat_stream(question: str, session_id: str) -> AsyncIterator[str]:
         yield sse("tool", ToolEvent(name="search_docs", status="running",
                                     detail="جستجوی مستندات"))
         service = plan["service"] or session.service
-        hits = get_retriever().search(plan["query"], k=settings.top_k, service=service)
+        # هم سؤال خام هم بازنویسی‌شده — بازنویسی نباید اطلاعات را بخورد
+        hits = get_retriever().search(
+            [question, plan["query"]], k=settings.top_k, service=service
+        )
 
         if service:
             session.service = service

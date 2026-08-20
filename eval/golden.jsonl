@@ -19,7 +19,7 @@
 {"q": "برنامه‌م بعد از چند ثانیه تایم‌اوت می‌خوره", "expect": "/paas/python/fix-common-errors/worker-timeout/", "type": "complex"}
 {"q": "آپلود فایل بزرگ رد می‌شه، محدودیت حجم رو چطور زیاد کنم؟", "expect": "/paas/python/fix-common-errors/upload-limit-size/", "type": "complex"}
 {"q": "از مرورگر به API‌م ریکوئست می‌زنم ولی بلاک می‌شه", "expect": "/paas/python/fix-common-errors/cors/", "type": "complex", "note": "کاربر کلمه CORS را نمی‌داند"}
-{"q": "می‌خوام فایل‌هام بعد از ری‌استارت پاک نشن", "expect": "/paas/python/how-tos/use-disk/", "type": "complex", "note": "مفهوم دیسک را نام نمی‌برد"}
+{"q": "می‌خوام فایل‌هام بعد از ری‌استارت پاک نشن", "expect": ["/paas/python/how-tos/use-disk/", "/paas/disks/about/"], "type": "complex", "note": "مفهوم دیسک را نام نمی‌برد؛ صفحه عمومی دیسک هم پاسخ درستی است"}
 {"q": "یه کاری رو هر روز ساعت ۳ صبح اجرا کنم", "expect": "/paas/python/how-tos/set-cron-job/", "type": "complex"}
 {"q": "چت زنده می‌خوام پیاده کنم، اتصال دائم لازم دارم", "expect": "/paas/python/how-tos/use-websocket/", "type": "complex"}
 {"q": "چند تا ورکر برای برنامه‌م بذارم؟", "expect": "/paas/python/how-tos/set-gunicorn-workers/", "type": "complex"}
