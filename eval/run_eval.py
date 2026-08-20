@@ -45,6 +45,34 @@ def load_golden() -> list[dict]:
     return rows
 
 
+def rewrite_all(questions: list[str]) -> dict[str, str]:
+    """
+    همه‌ی سؤالات را از مرحله‌ی بازنویسی رد می‌کند.
+
+    ⚠️ بدون این، eval فقط نصف خط لوله را می‌سنجد. محصول واقعی هرگز سؤال خام
+    را جستجو نمی‌کند — اول با مدل کوچک به واژگان مستندات ترجمه‌اش می‌کند.
+    «چند تا ورکر بذارم؟» در eval شکست می‌خورد ولی در محصول موفق است، چون
+    آنجا به «تعداد worker های gunicorn» تبدیل شده.
+    """
+    import asyncio
+
+    from app.agent import rewrite
+    from app.session import Session
+
+    async def run() -> dict[str, str]:
+        out: dict[str, str] = {}
+        for q in questions:
+            try:
+                plan = await rewrite(q, Session(id="_eval"))
+                out[q] = plan["query"] or q
+            except Exception as exc:
+                print(f"  بازنویسی ناموفق برای {q!r}: {type(exc).__name__}")
+                out[q] = q
+        return out
+
+    return asyncio.run(run())
+
+
 def _load_retriever(mode: str):
     """
     بازیابی‌کننده را برمی‌گرداند: (query, k) -> list[Chunk]
@@ -132,12 +160,21 @@ def main() -> None:
     mode = "dense" if "--dense" in sys.argv else "bm25" if "--bm25" in sys.argv else "hybrid"
     verbose = "--verbose" in sys.argv
 
+    use_rewrite = "--rewrite" in sys.argv
+
     search, label = _load_retriever(mode)
     rows = [r for r in load_golden() if r.get("expect")]
     ambiguous = len(load_golden()) - len(rows)
 
     print(f"روش بازیابی : {label}")
+    print(f"بازنویسی    : {'روشن (مثل محصول واقعی)' if use_rewrite else 'خاموش (سؤال خام)'}")
     print(f"سؤالات      : {len(rows)} سنجش‌پذیر + {ambiguous} مبهم (اینجا سنجیده نمی‌شوند)\n")
+
+    rewritten: dict[str, str] = {}
+    if use_rewrite:
+        print("در حال بازنویسی سؤالات…")
+        rewritten = rewrite_all([r["q"] for r in rows])
+        print()
 
     strict = {k: 0 for k in KS}
     loose = {k: 0 for k in KS}
@@ -145,7 +182,8 @@ def main() -> None:
     failures = []
 
     for row in rows:
-        results = search(row["q"], max(KS))
+        query = rewritten.get(row["q"], row["q"])
+        results = search(query, max(KS))
         urls = [c.url for c in results]
 
         r_strict = next((i + 1 for i, u in enumerate(urls) if row["expect"] in u), None)
@@ -177,6 +215,9 @@ def main() -> None:
         print(f"\nشکست‌ها ({len(failures)}):")
         for row, top in failures:
             print(f"\n  ✗ {row['q']}")
+            rq = rewritten.get(row["q"])
+            if rq and rq != row["q"]:
+                print(f"    بازنویسی: {rq}")
             print(f"    انتظار: {row['expect']}")
             if verbose:
                 for u in top:

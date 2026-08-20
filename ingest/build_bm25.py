@@ -31,7 +31,7 @@ _FENCE = re.compile(r"```.*?```", re.DOTALL)
 # صفحه‌ی «حذف باکت» (کلمه در عنوان) صفحه‌ای را که واقعاً ساخت باکت را یاد
 # می‌دهد (کلمه فقط در بدنه) شکست می‌داد. با LIARA_TITLE_BOOST قابل تنظیم
 # است تا با مجموعه‌ی طلایی اندازه‌گیری شود، نه حدس.
-TITLE_BOOST = int(os.environ.get("LIARA_TITLE_BOOST", "2"))
+TITLE_BOOST = int(os.environ.get("LIARA_TITLE_BOOST", "4"))
 
 
 def bm25_text(chunk: Chunk) -> str:
