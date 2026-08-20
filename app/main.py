@@ -16,6 +16,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.api_v1 import router as api_v1_router
 from app.contracts import ChatRequest, ErrorEvent, sse
 from app.mock import mock_chat_stream
 from app.settings import settings
@@ -55,6 +56,8 @@ app = FastAPI(
     docs_url="/api/docs",
     openapi_url="/api/openapi.json",
 )
+
+app.include_router(api_v1_router)
 
 
 # ---------------------------------------------------------------- health
