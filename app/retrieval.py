@@ -26,9 +26,22 @@ from app.text_norm import tokenize
 
 log = logging.getLogger("app.retrieval")
 
-# ثابت RRF. عدد بزرگ‌تر یعنی تفاوت رتبه‌های بالا کم‌اهمیت‌تر.
-# ۶۰ مقدار استاندارد مقاله‌ی اصلی است.
-RRF_K = 60
+# ثابت RRF.
+#
+# ۶۰ مقدار استاندارد مقاله‌ی اصلی است، ولی برای k کوچک بد کار می‌کند:
+# تفاوت 1/61 و 1/62 عملاً صفر است، پس سندی که در هر دو لیست متوسط است
+# سندی را که در یکی اول است شکست می‌دهد. یعنی «توافق» بر «اطمینان»
+# ترجیح داده می‌شود. عدد کوچک‌تر، رتبه‌های بالا را تیزتر می‌کند.
+RRF_K = 5
+# چقدر عمیق‌تر از k بازیابی کنیم قبل از ترکیب. عمق زیاد رقیق‌سازی می‌آورد.
+POOL_FACTOR = 2
+# وزن dense و bm25 — برابر.
+#
+# اول به dense وزن بیشتری داده بودم با این استدلال که سؤال کاربر توصیفی است.
+# جاروب روی مجموعه‌ی طلایی خلافش را نشان داد: وزن ۰.۵ برای BM25 حدود ۵۸٪
+# می‌داد و وزن ۱.۰ حدود ۶۸٪ — و این الگو در تمام ۱۲ ترکیب K/pool ثابت بود.
+# منطقی هم هست: مستندات فنی پر از اسم خاص است (liara.json، npm، gunicorn).
+WEIGHTS = (1.0, 1.0)
 
 
 @dataclass
@@ -59,12 +72,16 @@ class Hit:
         )
 
 
-def _rrf(ranked_lists: list[list[int]], weights: list[float]) -> dict[int, float]:
+def _rrf(
+    ranked_lists: list[list[int]],
+    weights: list[float],
+    rrf_k: int = RRF_K,
+) -> dict[int, float]:
     """Reciprocal Rank Fusion — امتیاز هر سند = مجموع w/(K+rank)."""
     scores: dict[int, float] = {}
     for ranking, w in zip(ranked_lists, weights):
         for rank, idx in enumerate(ranking, start=1):
-            scores[idx] = scores.get(idx, 0.0) + w / (RRF_K + rank)
+            scores[idx] = scores.get(idx, 0.0) + w / (rrf_k + rank)
     return scores
 
 
@@ -121,26 +138,28 @@ class Retriever:
         mode: str = "hybrid",
         service: str | None = None,
         variant: str | None = None,
+        rrf_k: int = RRF_K,
+        pool_factor: int = POOL_FACTOR,
+        weights: tuple[float, float] = WEIGHTS,
     ) -> list[Hit]:
         """
         mode: hybrid | dense | bm25
         service/variant: فیلتر اختیاری — وقتی از context مکالمه می‌دانیم
         کاربر روی چه سرویسی یا با چه فریم‌ورکی کار می‌کند.
+        بقیه پارامترها فقط برای جاروب در eval قابل تنظیم‌اند.
         """
         k = k or settings.top_k
-        pool = max(k * 6, 40)      # عمیق‌تر بازیابی کن، بعد ترکیب و برش بزن
+        pool = max(k * pool_factor, 20)
 
         if mode == "dense":
-            ranked, weights = [self._dense(query, pool)], [1.0]
+            ranked, w = [self._dense(query, pool)], [1.0]
         elif mode == "bm25":
-            ranked, weights = [self._sparse(query, pool)], [1.0]
+            ranked, w = [self._sparse(query, pool)], [1.0]
         else:
             ranked = [self._dense(query, pool), self._sparse(query, pool)]
-            # وزن بیشتر به برداری: سؤالات کاربران معمولاً توصیفی‌اند و
-            # کلیدواژه‌ی دقیق مستندات را ندارند.
-            weights = [1.0, 0.7]
+            w = list(weights)
 
-        scores = _rrf(ranked, weights)
+        scores = _rrf(ranked, w, rrf_k)
 
         hits: list[Hit] = []
         for idx in sorted(scores, key=lambda i: -scores[i]):

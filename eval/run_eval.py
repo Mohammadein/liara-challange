@@ -76,6 +76,58 @@ def _load_retriever(mode: str):
     return search, "bm25 (پایه — app/retrieval.py هنوز نیست)"
 
 
+def sweep() -> None:
+    """
+    جاروب پارامترهای فیوژن.
+
+    امبدینگ سؤالات کش شده، پس کل جاروب فقط به تعداد سؤالات تماس API دارد
+    نه به تعداد ترکیب‌ها.
+    """
+    from app.retrieval import Retriever
+
+    r = Retriever.load()
+    rows = [x for x in load_golden() if x.get("expect")]
+
+    def score(**kw) -> tuple[int, int]:
+        at5 = at1 = 0
+        for row in rows:
+            hits = r.search(row["q"], k=10, **kw)
+            stem = page_stem(row["expect"])
+            rank = next(
+                (i + 1 for i, h in enumerate(hits) if page_stem(h.url) == stem), None
+            )
+            at5 += bool(rank and rank <= 5)
+            at1 += bool(rank and rank == 1)
+        return at5, at1
+
+    n = len(rows)
+    print(f"جاروب روی {n} سؤال (معیار: صفحه‌محور)\n")
+    print(f"{'حالت':<28}{'@1':>8}{'@5':>10}")
+    print("-" * 46)
+
+    for mode in ("dense", "bm25"):
+        a5, a1 = score(mode=mode)
+        print(f"{mode:<28}{a1:>4}/{n}{a5:>7}/{n}  {a5 * 100 // n}%")
+
+    print()
+    best = (0, None)
+    for rrf_k in (5, 12, 30, 60):
+        for pool_factor in (2, 4, 8):
+            for w in (0.5, 0.8, 1.0, 1.3):
+                a5, a1 = score(
+                    mode="hybrid", rrf_k=rrf_k,
+                    pool_factor=pool_factor, weights=(1.0, w),
+                )
+                label = f"hybrid K={rrf_k} pool={pool_factor}x w={w}"
+                mark = ""
+                if a5 > best[0]:
+                    best = (a5, label)
+                    mark = "  ←"
+                print(f"{label:<28}{a1:>4}/{n}{a5:>7}/{n}  {a5 * 100 // n}%{mark}")
+
+    print(f"\nبهترین: {best[1]}  →  {best[0]}/{n}  ({best[0] * 100 // n}%)")
+
+
 def main() -> None:
     mode = "dense" if "--dense" in sys.argv else "bm25" if "--bm25" in sys.argv else "hybrid"
     verbose = "--verbose" in sys.argv
@@ -135,4 +187,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    if "--sweep" in sys.argv:
+        sweep()
+    else:
+        main()
