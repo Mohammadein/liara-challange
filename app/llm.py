@@ -12,7 +12,7 @@ import time
 from functools import lru_cache
 
 import numpy as np
-from openai import OpenAI
+from openai import AsyncOpenAI, OpenAI
 
 from app.settings import settings
 
@@ -34,6 +34,24 @@ def client() -> OpenAI:
         api_key=settings.liara_ai_api_key,
         timeout=60,
         max_retries=0,     # تلاش مجدد را خودمان مدیریت می‌کنیم
+    )
+
+
+@lru_cache(maxsize=1)
+def aclient() -> AsyncOpenAI:
+    """
+    کلاینت ناهمگام — برای استریم چت.
+
+    کلاینت همگام در یک اندپوینت async کل event loop را بلاک می‌کند و
+    درخواست‌های همزمان بقیه کاربران را متوقف می‌کند.
+    """
+    if not settings.llm_configured:
+        raise LLMUnavailable("کلید یا آدرس سرویس هوش مصنوعی تنظیم نشده است.")
+    return AsyncOpenAI(
+        base_url=settings.liara_ai_base_url,
+        api_key=settings.liara_ai_api_key,
+        timeout=60,
+        max_retries=1,
     )
 
 

@@ -31,8 +31,19 @@ STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # فازهای بعد: اینجا vectors.npy و chunks.json و bm25.pkl لود می‌شوند
-    log.info("startup mock=%s llm_configured=%s", settings.use_mock, settings.llm_configured)
+    # ایندکس همین‌جا لود می‌شود نه در اولین درخواست: اگر داده خراب باشد،
+    # باید موقع بالا آمدن بفهمیم، نه وسط دموی جلوی داور.
+    ready = False
+    if not settings.use_mock:
+        from app.agent import index_ready
+        ready = index_ready()
+        if not ready:
+            log.error("index failed to load — /api/chat will return errors")
+
+    log.info(
+        "startup mock=%s llm_configured=%s index=%s",
+        settings.use_mock, settings.llm_configured, ready,
+    )
     yield
     log.info("shutdown")
 
@@ -56,8 +67,15 @@ async def health():
         "version": app.version,
         "mock": settings.use_mock,
         "llm_configured": settings.llm_configured,
-        "index_loaded": False,  # فاز ۲
+        "index_loaded": _index_loaded(),
     }
+
+
+def _index_loaded() -> bool:
+    if settings.use_mock:
+        return False
+    from app.agent import index_ready
+    return index_ready()
 
 
 # ---------------------------------------------------------------- chat
@@ -75,10 +93,15 @@ async def chat(req: ChatRequest, request: Request):
             content={"message": "پیام بیش از حد طولانی است.", "code": "message_too_long"},
         )
 
+    if settings.use_mock:
+        source = mock_chat_stream(req.message, req.session_id)
+    else:
+        from app.agent import chat_stream
+        source = chat_stream(req.message, req.session_id)
+
     async def stream():
         try:
-            # فاز ۲ و ۳: اگر mock نبود، حلقه‌ی ایجنت واقعی اینجا صدا زده می‌شود
-            async for event in mock_chat_stream(req.message, req.session_id):
+            async for event in source:
                 if await request.is_disconnected():
                     log.info("client disconnected session=%s", req.session_id)
                     return
