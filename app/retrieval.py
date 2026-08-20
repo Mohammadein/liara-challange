@@ -198,6 +198,12 @@ class Retriever:
         top = sorted(scores, key=lambda i: -scores[i])[:k]
         return [Hit.from_dict(self.chunks[i], scores[i]) for i in top]
 
+    def find(self, needle: str, limit: int = 5) -> list[dict]:
+        """جستجوی زیررشته‌ای در تکه‌ها — برای پاسخ به «اصلاً این متن در ایندکس هست؟»"""
+        low = needle.lower()
+        out = [c for c in self.chunks if low in c["text"].lower()]
+        return out[:limit]
+
     def variants_of(self, hits: list[Hit]) -> list[str]:
         """
         واریانت‌های موجود بین نتایج — پایه‌ی سؤال تکمیلی.
@@ -210,3 +216,41 @@ class Retriever:
             if h.variant and h.variant not in seen:
                 seen.append(h.variant)
         return seen
+
+
+# ------------------------------------------------------------------ دیباگ
+
+if __name__ == "__main__":
+    import sys
+
+    for _s in (sys.stdout, sys.stderr):
+        if _s and getattr(_s, "encoding", "").lower() not in ("utf-8", "utf8"):
+            try:
+                _s.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+
+    r = Retriever.load()
+    args = sys.argv[1:]
+
+    if not args:
+        print("python -m app.retrieval \"کوئری\"          نتایج بازیابی")
+        print("python -m app.retrieval --find \"متن\"      آیا این متن در ایندکس هست؟")
+        sys.exit(0)
+
+    if args[0] == "--find":
+        found = r.find(" ".join(args[1:]))
+        print(f"{len(found)} تکه پیدا شد\n")
+        for c in found:
+            print(f"id   : {c['id']}")
+            print(f"url  : {c['url']}")
+            print(f"صفحه : {c['page_title']} › {c['section_title'] or '—'}")
+            print(f"متن  : {c['text'][:400]}\n")
+        sys.exit(0)
+
+    query = " ".join(args)
+    for mode in ("hybrid", "dense", "bm25"):
+        print(f"\n──── {mode} ────")
+        for i, h in enumerate(r.search(query, k=5, mode=mode), 1):
+            print(f"{i}. [{h.score:.4f}] {h.page_title} › {h.section_title or '—'}")
+            print(f"   {h.url}")

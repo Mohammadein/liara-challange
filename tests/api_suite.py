@@ -264,7 +264,18 @@ CASES: list[dict] = [
 # ---------------------------------------------------------------- ابزار
 
 def persian_ratio(text: str) -> float:
-    letters = [c for c in text if c.isalpha()]
+    """
+    نسبت حروف فارسی در **نثر** پاسخ.
+
+    بلوک‌های کد و کد درون‌خطی حذف می‌شوند: یک پاسخ درست درباره‌ی میرور npm
+    ناچار است `npm config set registry https://...` را نشان بدهد، و شمردن
+    آن حروف به‌عنوان «لاتین» تست را روی پاسخ درست می‌انداخت.
+    """
+    prose = re.sub(r"```.*?```", " ", text, flags=re.DOTALL)
+    prose = re.sub(r"`[^`\n]+`", " ", prose)
+    prose = re.sub(r"https?://\S+", " ", prose)
+
+    letters = [c for c in prose if c.isalpha()]
     if not letters:
         return 1.0
     fa = sum(1 for c in letters if "؀" <= c <= "ۿ")
