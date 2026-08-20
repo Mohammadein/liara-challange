@@ -96,17 +96,29 @@ def _embed_text(doc: ParsedDoc, seg: Segment, body: str) -> str:
     return "\n".join(x for x in head if x) + "\n---\n" + body
 
 
+def _variant_key(variant: str | None) -> str:
+    """برچسب واریانت را به قطعه‌ای امن برای شناسه تبدیل می‌کند."""
+    if not variant:
+        return "-"
+    return re.sub(r"[^\w.-]+", "_", variant.replace(" › ", "_")).strip("_") or "-"
+
+
 def chunk_doc(doc: ParsedDoc) -> list[Chunk]:
     slug = _relative_slug(doc.source_path)
     out: list[Chunk] = []
 
     for i, seg in enumerate(doc.segments):
-        anchor_key = seg.anchor or f"seg{i}"
+        # شماره بخش همیشه در شناسه می‌آید: یک anchor ممکن است در چند تب تکرار
+        # شود و بدون آن، تکه‌ها روی هم می‌افتند.
+        anchor_key = f"{seg.anchor}-{i}" if seg.anchor else f"seg{i}"
         url = f"{doc.url}#{seg.anchor}" if seg.anchor else doc.url
 
         for part, body in enumerate(_pack(seg.body)):
+            # تکه‌های عملاً خالی وارد ایندکس نمی‌شوند
+            if len(body.strip()) < 60:
+                continue
             out.append(Chunk(
-                id=f"{slug}#{anchor_key}#{part}",
+                id=f"{slug}#{anchor_key}#{_variant_key(seg.variant)}#{part}",
                 text=body,
                 embed_text=_embed_text(doc, seg, body),
                 url=url,

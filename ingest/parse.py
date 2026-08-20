@@ -126,6 +126,21 @@ def _attr(tag: str, name: str) -> str | None:
 # --------------------------------------------------------------- مراحل
 
 def _strip_imports(text: str) -> str:
+    """
+    حذف خطوط import.
+
+    ⚠️ importهای چندخطی هم باید بروند:
+        import { GoContainer,
+                 GoDatabase, ... } from "react-icons/go";
+    اگر فقط تک‌خطی‌ها را برداریم، دنباله‌ی اسم آیکون‌ها به‌عنوان «محتوا» در
+    ایندکس می‌نشیند و صفحه را با متنی بی‌ربط به‌عنوان منبع معرفی می‌کند.
+    """
+    text = re.sub(
+        r'^\s*import\s+\{[^}]*\}\s*from\s*["\'][^"\']*["\'];?\s*$',
+        "",
+        text,
+        flags=re.MULTILINE | re.DOTALL,
+    )
     return re.sub(r"^\s*import\s+.*$", "", text, flags=re.MULTILINE)
 
 
