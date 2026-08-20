@@ -43,6 +43,10 @@ POOL_FACTOR = 2
 # منطقی هم هست: مستندات فنی پر از اسم خاص است (liara.json، npm، gunicorn).
 WEIGHTS = (1.0, 1.0)
 
+# تقویت (نه فیلتر) وقتی سرویس یا واریانت از context مکالمه معلوم است.
+SERVICE_BOOST = 0.35
+VARIANT_BOOST = 0.25
+
 
 @dataclass
 class Hit:
@@ -161,17 +165,24 @@ class Retriever:
 
         scores = _rrf(ranked, w, rrf_k)
 
-        hits: list[Hit] = []
-        for idx in sorted(scores, key=lambda i: -scores[i]):
-            c = self.chunks[idx]
-            if service and c.get("service") != service:
-                continue
-            if variant and c.get("variant") != variant:
-                continue
-            hits.append(Hit.from_dict(c, scores[idx]))
-            if len(hits) >= k:
-                break
-        return hits
+        # سرویس و واریانت **تقویت** می‌کنند، فیلتر نمی‌کنند.
+        #
+        # اول فیلتر سخت بود و اشتباه بود: سرویس را یک تماس ارزان مدل حدس
+        # می‌زند و وقتی حدس غلط باشد، فیلتر پاسخ درست را کاملاً غیرقابل
+        # دسترس می‌کند. نمونه‌ی واقعی: «چطور دامنه اختصاصی به باکت وصل کنم؟»
+        # سرویس را dns-management-system حدس زد و صفحه‌ی
+        # object-storage/add-domain را بیرون انداخت.
+        # با تقویت، حدس درست کمک می‌کند و حدس غلط فقط بی‌اثر است.
+        if service or variant:
+            for idx in list(scores):
+                c = self.chunks[idx]
+                if service and c.get("service") == service:
+                    scores[idx] *= 1 + SERVICE_BOOST
+                if variant and c.get("variant") == variant:
+                    scores[idx] *= 1 + VARIANT_BOOST
+
+        top = sorted(scores, key=lambda i: -scores[i])[:k]
+        return [Hit.from_dict(self.chunks[i], scores[i]) for i in top]
 
     def variants_of(self, hits: list[Hit]) -> list[str]:
         """

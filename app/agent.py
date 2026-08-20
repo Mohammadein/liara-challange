@@ -195,8 +195,6 @@ async def answer_once(
 
     retriever = get_retriever()
     hits = retriever.search(query, k=k or settings.top_k, service=service)
-    if not hits and service:
-        hits = retriever.search(query, k=k or settings.top_k)
 
     resp = await aclient().chat.completions.create(
         model=settings.model_answer,
@@ -262,8 +260,6 @@ async def chat_stream(question: str, session_id: str) -> AsyncIterator[str]:
                                     detail="جستجوی مستندات"))
         service = plan["service"] or session.service
         hits = get_retriever().search(plan["query"], k=settings.top_k, service=service)
-        if not hits and service:
-            hits = get_retriever().search(plan["query"], k=settings.top_k)
 
         if service:
             session.service = service
