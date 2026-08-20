@@ -21,7 +21,7 @@
   "section_title": "فایل liara.json",
   "breadcrumb": "پلتفرم (PaaS) › django › راهنماها",
   "service": "paas",
-  "method": "Liara CLI",
+  "variant": "Liara CLI",
   "has_code": true,
   "source_path": "src/pages/paas/django/how-tos/deploy-app.mdx"
 }
@@ -36,7 +36,7 @@
 | `section_title` | عنوان `<Section title="...">` |
 | `breadcrumb` | مسیر خوانا برای نمایش و برای غنی‌سازی متن امبدینگ |
 | `service` | یکی از ۱۱ بخش سطح‌اول. برای فیلتر بازیابی. |
-| `method` | از `<Tabs>`: `Liara Console` \| `Liara CLI` \| `Github` \| `null` |
+| `variant` | برچسب `<Tabs>` — ۷۷ مقدار مختلف: روش استقرار، فریم‌ورک، زبان، سیستم‌عامل، پروتکل، … |
 | `has_code` | آیا تکه بلوک کد دارد |
 | `source_path` | مسیر فایل اصلی، فقط برای دیباگ |
 

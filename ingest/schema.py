@@ -38,9 +38,9 @@ class Chunk:
     breadcrumb: str = ""       # مثال: "PaaS › Django › راهنماها"
 
     # --- متادیتا برای فیلتر و شخصی‌سازی ---
-    service: str = ""          # اولین بخش مسیر: paas | dbaas | ai | object-storage | ...
-    method: str | None = None  # از <Tabs>: "Liara Console" | "Liara CLI" | "Github" | None
-    has_code: bool = False     # آیا تکه بلوک کد دارد
+    service: str = ""           # اولین بخش مسیر: paas | dbaas | ai | object-storage | ...
+    variant: str | None = None  # برچسب <Tabs>؛ ۷۷ مقدار مختلف در مستندات دیده شد
+    has_code: bool = False      # آیا تکه بلوک کد دارد
 
     # --- ردیابی ---
     source_path: str = ""      # مسیر فایل اصلی، برای دیباگ
@@ -72,7 +72,7 @@ EXAMPLE_CHUNK = Chunk(
     section_title="فایل liara.json",
     breadcrumb="PaaS › Django › راهنماها",
     service="paas",
-    method="Liara CLI",
+    variant="Liara CLI",
     has_code=True,
     source_path="src/pages/paas/django/how-tos/deploy-app.mdx",
 )
