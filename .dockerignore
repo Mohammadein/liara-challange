@@ -1,0 +1,16 @@
+# مخزن مستندات لیارا فقط build time لازم است، نه در ایمیج
+docs/
+
+# خط لوله ingest هم فقط روی لپ‌تاپ اجرا می‌شود
+ingest/
+eval/
+.cache/
+
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.git/
+.gitignore
+*.md

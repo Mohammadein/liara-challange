@@ -1,0 +1,5 @@
+{
+  "app": "liara-docs-assistant",
+  "platform": "docker",
+  "port": 8000
+}

@@ -1,0 +1,8 @@
+{"q": "نسخه پایتون برنامه رو کجا تعیین کنم؟", "expect_url": "https://docs.liara.ir/paas/django/how-tos/deploy-app/", "type": "simple"}
+{"q": "baseUrl سرویس هوش مصنوعی لیارا چیه؟", "expect_url": "https://docs.liara.ir/ai/quick-start/", "type": "simple"}
+{"q": "چطور با CLI برنامه رو دیپلوی کنم؟", "expect_url": "https://docs.liara.ir/references/cli/deploy-app/", "type": "simple"}
+{"q": "میرور npm لیارا رو چطور تنظیم کنم؟", "expect_url": "https://docs.liara.ir/mirrors/npm/", "type": "simple"}
+{"q": "چطور به تیمم عضو اضافه کنم؟", "expect_url": "https://docs.liara.ir/references/team/invite-members/", "type": "simple"}
+{"q": "پکیج‌هام موقع دیپلوی نصب نمی‌شن، چیکار کنم؟", "expect_url": "https://docs.liara.ir/paas/django/how-tos/deploy-app/", "type": "complex"}
+{"q": "می‌خوام سایتم رو بالا بیارم", "expect_url": null, "type": "ambiguous", "note": "باید بپرسد چه پلتفرمی و با چه روشی"}
+{"q": "دیپلوی کنم", "expect_url": null, "type": "ambiguous", "note": "باید سؤال تکمیلی بپرسد"}
