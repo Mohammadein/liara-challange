@@ -120,15 +120,18 @@ function addMessage(who, cls) {
 }
 
 const TOOL_LABELS = {
-  search_docs:         "جستجوی مستندات",
-  diagnose_error:      "تحلیل خطا",
-  generate_liara_json: "ساخت فایل liara.json",
-  estimate_cost:       "تخمین هزینه",
+  understand:  "درک سؤال",
+  search_docs: "جستجوی مستندات",
 };
 
 function renderTool(container, ev) {
-  const id = "tool-" + ev.name;
-  let el = container.querySelector('[data-id="' + id + '"]');
+  // شناسه شامل جزئیات است تا دو جستجوی متفاوت دو چیپ جدا بسازند،
+  // نه اینکه دومی روی اولی بنویسد و کار ایجنت نامرئی شود.
+  const id = "tool-" + ev.name + "-" + (ev.status === "done" ? "" : ev.detail || "");
+  let el = container.querySelector('[data-id="' + CSS.escape(id) + '"]')
+        || (ev.status === "done"
+              ? container.querySelector('[data-id^="tool-' + ev.name + '"]:not(.done)')
+              : null);
   if (!el) {
     el = document.createElement("div");
     el.dataset.id = id;

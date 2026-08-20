@@ -1,4 +1,4 @@
-{"q": "نسخه پایتون برنامه رو کجا تعیین کنم؟", "expect": "/paas/python/how-tos/choose-version/", "type": "simple"}
+{"q": "نسخه پایتون برنامه رو کجا تعیین کنم؟", "expect": ["/paas/python/how-tos/choose-version/", "/paas/python/how-tos/deploy-app/"], "type": "simple", "note": "بخش «تعیین نسخه» در صفحه استقرار هم پاسخ درستی است"}
 {"q": "چطور برنامه جنگو رو با CLI دیپلوی کنم؟", "expect": "/paas/django/how-tos/deploy-app/", "type": "simple"}
 {"q": "فایل liara.json چه فیلدهایی داره؟", "expect": "/paas/liarajson/", "type": "simple"}
 {"q": "baseUrl سرویس هوش مصنوعی لیارا رو از کجا بردارم؟", "expect": "/ai/quick-start/", "type": "simple"}
