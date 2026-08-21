@@ -25,6 +25,7 @@ from app.contracts import (
     ToolEvent,
     sse,
 )
+from app.session import sessions
 
 TOKEN_DELAY = (0.012, 0.035)  # تأخیر مصنوعی تا حس واقعی استریم بدهد
 
@@ -119,7 +120,12 @@ async def _stream_text(text: str) -> AsyncIterator[str]:
         await asyncio.sleep(random.uniform(*TOKEN_DELAY))
 
 
-async def mock_chat_stream(message: str, session_id: str) -> AsyncIterator[str]:
+async def mock_chat_stream(
+    message: str,
+    session_id: str,
+    client_id: str | None = None,
+) -> AsyncIterator[str]:
+    session = sessions.get(session_id, client_id)
     scenario = _pick_scenario(message)
 
     # --- سناریوی سؤال تکمیلی: هیچ ابزاری صدا زده نمی‌شود ---
@@ -127,6 +133,8 @@ async def mock_chat_stream(message: str, session_id: str) -> AsyncIterator[str]:
         await asyncio.sleep(0.3)
         async for ev in _stream_text(_ANSWER_CLARIFY):
             yield ev
+        session.add("user", message)
+        session.add("assistant", _ANSWER_CLARIFY)
         yield sse("done", DoneEvent(tokens_used=180, cached=False, latency_ms=1400))
         return
 
@@ -146,6 +154,11 @@ async def mock_chat_stream(message: str, session_id: str) -> AsyncIterator[str]:
         async for ev in _stream_text(_ANSWER_DIAGNOSE):
             yield ev
         yield sse("sources", SourcesEvent(items=_SOURCES_DIAGNOSE))
+        session.add("user", message)
+        session.add(
+            "assistant", _ANSWER_DIAGNOSE,
+            sources=[source.model_dump() for source in _SOURCES_DIAGNOSE],
+        )
         yield sse("done", DoneEvent(tokens_used=760, cached=False, latency_ms=3100))
         return
 
@@ -160,4 +173,9 @@ async def mock_chat_stream(message: str, session_id: str) -> AsyncIterator[str]:
         yield ev
 
     yield sse("sources", SourcesEvent(items=_SOURCES_NORMAL))
+    session.add("user", message)
+    session.add(
+        "assistant", _ANSWER_NORMAL,
+        sources=[source.model_dump() for source in _SOURCES_NORMAL],
+    )
     yield sse("done", DoneEvent(tokens_used=620, cached=False, latency_ms=2450))

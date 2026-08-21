@@ -1,4 +1,5 @@
 {"q": "نسخه پایتون برنامه رو کجا تعیین کنم؟", "expect": ["/paas/python/how-tos/choose-version/", "/paas/python/how-tos/deploy-app/"], "type": "simple", "note": "بخش «تعیین نسخه» در صفحه استقرار هم پاسخ درستی است"}
+{"q": "نسخه پایتون رو میتونم بعد از استقرار سرویس عوض کنم؟", "expect": ["/paas/python/how-tos/choose-version/", "/paas/python/how-tos/deploy-app/"], "type": "simple", "note": "Python صریح است؛ نباید درباره سرویس سؤال تکمیلی بپرسد یا به one-click-apps برود"}
 {"q": "چطور برنامه جنگو رو با CLI دیپلوی کنم؟", "expect": "/paas/django/how-tos/deploy-app/", "type": "simple"}
 {"q": "فایل liara.json چه فیلدهایی داره؟", "expect": "/paas/liarajson/", "type": "simple"}
 {"q": "baseUrl سرویس هوش مصنوعی لیارا رو از کجا بردارم؟", "expect": "/ai/quick-start/", "type": "simple"}
@@ -6,6 +7,7 @@
 {"q": "میرور npm لیارا رو چطور تنظیم کنم؟", "expect": "/mirrors/npm/", "type": "simple"}
 {"q": "آدرس میرور pypi لیارا چیه؟", "expect": "/mirrors/pypi/", "type": "simple"}
 {"q": "نصب liara cli", "expect": "/references/cli/install/", "type": "simple"}
+{"q": "Liara CLI چه امکاناتی دارد؟", "expect": "/references/cli/about/", "type": "simple", "note": "نباید امکانات را با بسته امکانات نرم‌افزاری اشتباه بگیرد"}
 {"q": "چطور به تیمم عضو جدید دعوت کنم؟", "expect": "/references/team/invite-members/", "type": "simple"}
 {"q": "متغیر محیطی رو با خط فرمان چطور اضافه کنم؟", "expect": "/references/cli/add-or-edit-envs/", "type": "simple"}
 {"q": "لاگ‌های برنامه‌م رو چطور ببینم؟", "expect": "/references/cli/see-app-logs/", "type": "simple"}
@@ -33,3 +35,4 @@
 {"q": "قیمتش چنده؟", "expect": null, "type": "ambiguous", "note": "قیمت کدام سرویس؟"}
 {"q": "کار نمی‌کنه", "expect": null, "type": "ambiguous", "note": "هیچ اطلاعاتی ندارد"}
 {"q": "بهترین گزینه برای پروژه من چیه؟", "expect": null, "type": "ambiguous", "note": "باید درباره پروژه بپرسد"}
+{"q": "چطوری دیتابیس رو مستقر کنم؟", "expect": null, "type": "ambiguous", "note": "نوع دیتابیس مشخص نیست؛ نباید صفحات restore چند دیتابیس را ادغام کند"}

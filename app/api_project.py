@@ -59,6 +59,7 @@ class OptionsResponse(BaseModel):
 
 class PlanRequest(BaseModel):
     session_id: str = Field(min_length=1, max_length=64)
+    client_id: str | None = Field(default=None, min_length=16, max_length=64)
     description: str = Field(
         min_length=3, max_length=1000,
         examples=["یه فروشگاه آنلاین با پنل ادمین و آپلود عکس محصول"],
@@ -175,10 +176,11 @@ async def plan(req: PlanRequest, request: Request):
             "message": "خطای داخلی."})
 
     # پروفایل در session می‌ماند تا سؤالات بعدی شخصی‌سازی شوند
-    session = sessions.get(req.session_id)
+    session = sessions.get(req.session_id, req.client_id)
     session.profile = profile
     if profile.variant_hint:
         session.variant = profile.variant_hint
+    session.save()
 
     log.info("plan rid=%s platform=%s needs=%d services=%d tokens=%d",
              request_id, profile.platform, len(profile.needs),

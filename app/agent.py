@@ -40,6 +40,7 @@ from app.retrieval import Hit, Retriever
 from app.tools import TOOL_SPECS, ToolBox
 from app.session import Session, sessions
 from app.settings import settings
+from app.text_norm import normalize
 
 log = logging.getLogger("app.agent")
 
@@ -47,6 +48,166 @@ log = logging.getLogger("app.agent")
 MAX_TOOL_ROUNDS = 2
 
 _retriever: Retriever | None = None
+
+_DATABASE_TERMS = (
+    "دیتابیس", "پایگاه داده", "database", " db ",
+)
+_DATABASE_ACTIONS = (
+    "راه اندازی", "مستقر", "دیپلوی", "deploy", "نصب", "ایجاد", "ساخت",
+    "بساز", "وصل", "اتصال", "connect", "بکاپ", "backup", "بازیابی", "restore",
+)
+_DATABASE_ENGINE_ALIASES = {
+    "PostgreSQL": ("postgresql", "postgres", "پستگرس", "پستگری"),
+    "MySQL": ("mysql", "my sql", "مای اس کیو ال", "مای اسکیوال"),
+    "MariaDB": ("mariadb", "maria db", "ماریا دی بی", "ماریا"),
+    "MongoDB": ("mongodb", "mongo", "مونگو"),
+    "Redis": ("redis", "ردیس"),
+    "SQL Server": ("mssql", "sql server", "sqlserver", "اس کیو ال سرور"),
+    "Elasticsearch": ("elasticsearch", "elastic search", "الاستیک"),
+    "RabbitMQ": ("rabbitmq", "rabbit mq", "ربیت ام کیو", "ربیت"),
+    "SQLite": ("sqlite", "اس کیو لایت"),
+}
+_PROFILE_DATABASE_NAMES = {
+    "postgresql": "PostgreSQL", "mysql": "MySQL", "mariadb": "MariaDB",
+    "mongodb": "MongoDB", "redis": "Redis", "mssql": "SQL Server",
+    "elasticsearch": "Elasticsearch", "rabbitmq": "RabbitMQ", "sqlite": "SQLite",
+}
+_DATABASE_URL_SLUGS = {
+    "PostgreSQL": "postgresql", "MySQL": "mysql", "MariaDB": "mariadb",
+    "MongoDB": "mongodb", "Redis": "redis", "SQL Server": "mssql",
+    "Elasticsearch": "elastic-search", "RabbitMQ": "rabbitmq",
+}
+_DATABASE_SETUP_ACTIONS = (
+    "راه اندازی", "مستقر", "دیپلوی", "deploy", "نصب", "ایجاد", "ساخت", "بساز",
+)
+
+
+def _database_engine(text: str, session: Session) -> str | None:
+    profile_database = getattr(session.profile, "database", None)
+    if profile_database in _PROFILE_DATABASE_NAMES:
+        return _PROFILE_DATABASE_NAMES[profile_database]
+    for canonical, aliases in _DATABASE_ENGINE_ALIASES.items():
+        if any(alias in text for alias in aliases):
+            return canonical
+    return None
+
+
+def database_setup_route(
+    question: str, session: Session,
+) -> tuple[str, str, str] | None:
+    """Return the canonical quick-setup query after the DB engine is known."""
+    current = f" {normalize(question)} "
+    recent_user_text = " ".join(
+        turn["content"] for turn in session.turns[-8:] if turn["role"] == "user"
+    )
+    evidence = f" {normalize(recent_user_text + ' ' + question)} "
+    engine = _database_engine(evidence, session)
+    if not engine:
+        return None
+
+    last_assistant = next(
+        (turn["content"] for turn in reversed(session.turns)
+         if turn["role"] == "assistant"),
+        "",
+    )
+    answers_engine_question = (
+        "کدام دیتابیس" in last_assistant and _database_engine(current, session) is not None
+    )
+    setup_requested = any(action in current for action in _DATABASE_SETUP_ACTIONS)
+    if not setup_requested and not answers_engine_question:
+        return None
+
+    if engine == "SQLite":
+        return (
+            "استفاده از دیتابیس SQLite با دیسک دائمی در برنامه لیارا",
+            "paas", "/paas/",
+        )
+    slug = _DATABASE_URL_SLUGS[engine]
+    return (
+        f"راه‌اندازی سریع دیتابیس {engine} با کنسول لیارا",
+        "dbaas", f"/dbaas/{slug}/",
+    )
+
+
+def python_version_route(question: str) -> tuple[str, str, str] | None:
+    """Route explicit Python-version questions away from one-click app pages."""
+    text = f" {normalize(question)} "
+    mentions_python = "python" in text or "پایتون" in text
+    mentions_version = "نسخه" in text or "version" in text or "ورژن" in text
+    if not (mentions_python and mentions_version):
+        return None
+
+    if "django" in text or "جنگو" in text:
+        platform, slug = "Django", "django"
+    elif "flask" in text or "فلسک" in text:
+        platform, slug = "Flask", "flask"
+    else:
+        platform, slug = "Python", "python"
+    return (
+        f"تغییر نسخه پیش‌فرض Python در پلتفرم {platform} با فایل liara.json",
+        "paas", f"/paas/{slug}/",
+    )
+
+
+def liara_cli_route(
+    question: str, session: Session,
+) -> tuple[str, str, str] | None:
+    """Keep short CLI follow-ups anchored to the CLI documentation."""
+    current = f" {normalize(question)} "
+    recent_users = [
+        normalize(turn["content"])
+        for turn in session.turns[-8:] if turn["role"] == "user"
+    ]
+    previous = f" {' '.join(recent_users[-2:])} "
+    mentions_cli = any(term in current for term in (" liara cli ", " cli ", "خط فرمان"))
+    cli_context = mentions_cli or any(
+        term in previous for term in ("liara cli", " cli ", "خط فرمان")
+    )
+    if not cli_context:
+        return None
+
+    install_terms = (
+        "نصب", "راه اندازی", "ستاپ", "setup", "install", "اپدیت", "به روز",
+    )
+    capability_terms = (
+        "امکانات", "قابلیت", "چه کار", "کارایی", "دستورات", "command",
+    )
+    if any(term in current for term in install_terms):
+        return (
+            "نصب و به‌روزرسانی Liara CLI",
+            "references", "/references/cli/install/",
+        )
+    if any(term in current for term in capability_terms):
+        return (
+            "معرفی امکانات و دسته‌بندی دستورهای Liara CLI",
+            "references", "/references/cli/about/",
+        )
+    return None
+
+
+def database_clarification(question: str, session: Session) -> str | None:
+    """Ask for the engine before engine-specific database instructions.
+
+    This is deterministic because searching first can mix quick-setup, restore,
+    and connection pages from several database engines into an unsafe answer.
+    """
+    current = f" {normalize(question)} "
+    recent_user_text = " ".join(
+        turn["content"] for turn in session.turns[-8:] if turn["role"] == "user"
+    )
+    evidence = f" {normalize(recent_user_text + ' ' + question)} "
+
+    engine_known = _database_engine(evidence, session) is not None
+    database_topic = any(term in evidence for term in _DATABASE_TERMS)
+    action_needs_engine = any(term in current for term in _DATABASE_ACTIONS)
+
+    if database_topic and action_needs_engine and not engine_known:
+        return (
+            "کدام دیتابیس را می‌خواهید راه‌اندازی کنید؟ "
+            "PostgreSQL، MySQL، MariaDB، MongoDB، Redis، SQL Server، "
+            "Elasticsearch یا RabbitMQ؟"
+        )
+    return None
 
 
 def get_retriever() -> Retriever:
@@ -73,6 +234,39 @@ async def rewrite(question: str, session: Session) -> dict:
     اگر مدل کوچک خطا داد یا JSON بی‌ربط برگرداند، به خود سؤال برمی‌گردیم.
     یک بازنویسی ناموفق نباید کل پاسخ را از بین ببرد.
     """
+    deterministic_clarification = database_clarification(question, session)
+    if deterministic_clarification:
+        return {
+            "query": "راه‌اندازی دیتابیس در لیارا",
+            "service": "dbaas",
+            "clarify": deterministic_clarification,
+            "tokens": 0,
+        }
+
+    deterministic_setup = database_setup_route(question, session)
+    if deterministic_setup:
+        query, service, url_prefix = deterministic_setup
+        return {
+            "query": query, "service": service, "clarify": None,
+            "tokens": 0, "canonical": True, "url_prefix": url_prefix,
+        }
+
+    deterministic_python_version = python_version_route(question)
+    if deterministic_python_version:
+        query, service, url_prefix = deterministic_python_version
+        return {
+            "query": query, "service": service, "clarify": None,
+            "tokens": 0, "canonical": True, "url_prefix": url_prefix,
+        }
+
+    deterministic_cli = liara_cli_route(question, session)
+    if deterministic_cli:
+        query, service, url_prefix = deterministic_cli
+        return {
+            "query": query, "service": service, "clarify": None,
+            "tokens": 0, "canonical": True, "url_prefix": url_prefix,
+        }
+
     history = session.transcript()
     user = f"مکالمه تا اینجا:\n{history}\n\nسؤال جدید: {question}" if history else question
 
@@ -183,6 +377,8 @@ async def answer_once(
 
     if plan["clarify"]:
         if session_id:
+            if plan["service"]:
+                session.service = plan["service"]
             session.add("user", question)
             session.add("assistant", plan["clarify"])
         return AnswerResult(
@@ -198,7 +394,11 @@ async def answer_once(
     service = plan["service"] or session.service
 
     retriever = get_retriever()
-    hits = retriever.search([question, query], k=k or settings.top_k, service=service)
+    search_queries = [query] if plan.get("canonical") else [question, query]
+    hits = retriever.search(
+        search_queries, k=k or settings.top_k, service=service,
+        url_prefix=plan.get("url_prefix"),
+    )
 
     resp = await aclient().chat.completions.create(
         model=settings.model_answer,
@@ -216,9 +416,10 @@ async def answer_once(
 
     if session_id:
         session.add("user", question)
-        session.add("assistant", answer)
+        session.add("assistant", answer, sources=[s.model_dump() for s in _sources(hits)])
         if service:
             session.service = service
+        session.save()
 
     return AnswerResult(
         answer=answer, hits=hits, query_used=query, service=service,
@@ -314,9 +515,13 @@ def _tool_detail(name: str, raw_result: str) -> str:
 
 # ------------------------------------------------------------ حلقه اصلی
 
-async def chat_stream(question: str, session_id: str) -> AsyncIterator[str]:
+async def chat_stream(
+    question: str,
+    session_id: str,
+    client_id: str | None = None,
+) -> AsyncIterator[str]:
     started = time.perf_counter()
-    session = sessions.get(session_id)
+    session = sessions.get(session_id, client_id)
     tokens_used = 0
 
     try:
@@ -333,6 +538,8 @@ async def chat_stream(question: str, session_id: str) -> AsyncIterator[str]:
                                         detail="نیاز به توضیح بیشتر"))
             for word in plan["clarify"].split(" "):
                 yield sse("token", TokenEvent(t=word + " "))
+            if plan["service"]:
+                session.service = plan["service"]
             session.add("user", question)
             session.add("assistant", plan["clarify"])
             yield sse("done", DoneEvent(
@@ -352,13 +559,14 @@ async def chat_stream(question: str, session_id: str) -> AsyncIterator[str]:
 
         # پلتفرم پروفایل به کوئری اضافه می‌شود تا نسخه‌ی درست صفحه بالا
         # بیاید: کاربر جنگویی نباید مستندات nodejs بگیرد.
-        queries = [question, plan["query"]]
+        queries = [plan["query"]] if plan.get("canonical") else [question, plan["query"]]
         if profile and profile.platform:
             queries.append(f"{plan['query']} {profile.platform}")
 
         hits = get_retriever().search(
             queries, k=settings.top_k, service=service,
             variant=session.variant or (profile.variant_hint if profile else None),
+            url_prefix=plan.get("url_prefix"),
         )
 
         if service:
@@ -463,11 +671,17 @@ async def chat_stream(question: str, session_id: str) -> AsyncIterator[str]:
                 })
 
         # --- ۵. منابع ---
+        stored_sources: list[Source] = []
         if box.collected:
-            yield sse("sources", SourcesEvent(items=_sources(box.collected)))
+            stored_sources = _sources(box.collected)
+            yield sse("sources", SourcesEvent(items=stored_sources))
 
         session.add("user", question)
-        session.add("assistant", answer)
+        session.add(
+            "assistant", answer,
+            sources=[source.model_dump() for source in stored_sources],
+        )
+        session.save()
 
         yield sse("done", DoneEvent(
             tokens_used=tokens_used, cached=False,

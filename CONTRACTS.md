@@ -64,7 +64,7 @@
 POST /api/chat
 Content-Type: application/json
 
-{ "message": "نسخه پایتون رو کجا تعیین کنم؟", "session_id": "uuid" }
+{ "message": "نسخه پایتون رو کجا تعیین کنم؟", "session_id": "uuid", "client_id": "browser-uuid" }
 ```
 
 ### پاسخ — `text/event-stream`
@@ -109,6 +109,16 @@ Agentic عملاً دیده نمی‌شود. داور باید روی صفحه �
 | ۴۱۳ | `message_too_long` | پیام از سقف بلندتر است |
 | ۴۲۹ | `rate_limited` | سقف نرخ رد شده (فاز ۵) |
 | ۵۰۰ | `internal_error` | خطای داخلی |
+
+### تاریخچه گفتگو
+
+| متد | مسیر | کاربرد |
+|---|---|---|
+| `GET` | `/api/sessions?client_id=...` | فهرست گفتگوهای همان مرورگر |
+| `POST` | `/api/sessions` | ساخت گفتگوی جدید |
+| `GET` | `/api/sessions/{id}?client_id=...` | پیام‌ها و منابع یک گفتگو |
+| `PATCH` | `/api/sessions/{id}` | تغییر نام گفتگو |
+| `DELETE` | `/api/sessions/{id}?client_id=...` | حذف گفتگو |
 
 ---
 

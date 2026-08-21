@@ -121,17 +121,29 @@ class Retriever:
 
     # ---------------------------------------------------------- جستجو
 
-    def _dense(self, query: str, n: int) -> list[int]:
+    def _dense(
+        self, query: str, n: int, allowed: list[int] | None = None,
+    ) -> list[int]:
         from app.llm import embed_query_np
 
         sims = self.vectors @ embed_query_np(query)     # کل جستجو، همین یک خط
+        if allowed is not None:
+            candidates = np.asarray(allowed, dtype=np.int64)
+            order = np.argsort(-sims[candidates])[:n]
+            return candidates[order].tolist()
         return np.argsort(-sims)[:n].tolist()
 
-    def _sparse(self, query: str, n: int) -> list[int]:
+    def _sparse(
+        self, query: str, n: int, allowed: list[int] | None = None,
+    ) -> list[int]:
         tokens = tokenize(query)
         if not tokens:
             return []
         scores = self.bm25.get_scores(tokens)
+        if allowed is not None:
+            candidates = np.asarray(allowed, dtype=np.int64)
+            order = np.argsort(-scores[candidates])[:n]
+            return candidates[order].tolist()
         return np.argsort(-scores)[:n].tolist()
 
     def search(
@@ -142,14 +154,17 @@ class Retriever:
         mode: str = "hybrid",
         service: str | None = None,
         variant: str | None = None,
+        url_prefix: str | None = None,
         rrf_k: int = RRF_K,
         pool_factor: int = POOL_FACTOR,
         weights: tuple[float, float] = WEIGHTS,
     ) -> list[Hit]:
         """
         mode: hybrid | dense | bm25
-        service/variant: فیلتر اختیاری — وقتی از context مکالمه می‌دانیم
+        service/variant: تقویت اختیاری — وقتی از context مکالمه می‌دانیم
         کاربر روی چه سرویسی یا با چه فریم‌ورکی کار می‌کند.
+        url_prefix: فیلتر سخت فقط برای intent قطعی و قاعده‌محور؛ حدس مدل
+        هرگز نباید به این پارامتر داده شود.
         بقیه پارامترها فقط برای جاروب در eval قابل تنظیم‌اند.
         """
         k = k or settings.top_k
@@ -164,6 +179,11 @@ class Retriever:
         # «جایگزینی» به «غنی‌سازی» تبدیل می‌کند.
         queries = [query] if isinstance(query, str) else [q for q in query if q]
         queries = list(dict.fromkeys(queries)) or [""]
+        allowed = (
+            [i for i, chunk in enumerate(self.chunks)
+             if url_prefix in chunk.get("url", "")]
+            if url_prefix else None
+        )
 
         ranked: list[list[int]] = []
         w: list[float] = []
@@ -171,10 +191,10 @@ class Retriever:
             # کوئری اول (سؤال خام کاربر) وزن کامل؛ بقیه کمی کمتر
             qw = 1.0 if i == 0 else 0.85
             if mode in ("dense", "hybrid"):
-                ranked.append(self._dense(q, pool))
+                ranked.append(self._dense(q, pool, allowed))
                 w.append(weights[0] * qw)
             if mode in ("bm25", "hybrid"):
-                ranked.append(self._sparse(q, pool))
+                ranked.append(self._sparse(q, pool, allowed))
                 w.append(weights[1] * qw)
 
         scores = _rrf(ranked, w, rrf_k)

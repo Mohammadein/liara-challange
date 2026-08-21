@@ -40,6 +40,8 @@ class Settings(BaseSettings):
 
     # --- عملیات ---
     log_level: str = "INFO"
+    # روی لیارا برای ماندگاری بین deployها این مسیر را روی Disk قرار دهید.
+    session_db_path: str = "data/sessions.db"
 
     @property
     def llm_configured(self) -> bool:

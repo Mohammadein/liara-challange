@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api_project import router as api_project_router
+from app.api_sessions import router as api_sessions_router
 from app.api_v1 import router as api_v1_router
 from app.contracts import ChatRequest, ErrorEvent, sse
 from app.mock import mock_chat_stream
@@ -60,6 +61,7 @@ app = FastAPI(
 
 app.include_router(api_v1_router)
 app.include_router(api_project_router)
+app.include_router(api_sessions_router)
 
 
 # ---------------------------------------------------------------- health
@@ -99,10 +101,10 @@ async def chat(req: ChatRequest, request: Request):
         )
 
     if settings.use_mock:
-        source = mock_chat_stream(req.message, req.session_id)
+        source = mock_chat_stream(req.message, req.session_id, req.client_id)
     else:
         from app.agent import chat_stream
-        source = chat_stream(req.message, req.session_id)
+        source = chat_stream(req.message, req.session_id, req.client_id)
 
     async def stream():
         try:
