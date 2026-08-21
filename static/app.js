@@ -89,16 +89,20 @@ async function openSession(id) {
   localStorage.setItem(SESSION_KEY, id);
   titleEl.textContent = data.title;
   clearMessages(false);
-  for (const message of data.messages) {
+  const lastIndex = data.messages.length - 1;
+  data.messages.forEach((message, index) => {
     const ui = addMessage(message.role === "user" ? "شما" : "دستیار",
                           message.role === "user" ? "user" : "");
     if (message.role === "assistant") {
       ui.bubble.innerHTML = renderMarkdown(message.content);
       renderSources(ui.sources, message.sources);
+      // فقط چیپ‌های آخرین پاسخ زنده می‌مانند: پیشنهاد قدم بعدی برای پیامی
+      // که کاربر ده نوبت قبل گرفته، دیگر «بعدی» نیست.
+      if (index === lastIndex) renderSuggestions(ui.suggestions, message.suggestions);
     } else {
       ui.bubble.textContent = message.content;
     }
-  }
+  });
   if (!data.messages.length) showEmpty();
   renderSessionList();
   syncNewChatButton();
@@ -177,6 +181,7 @@ function showEmpty() {
         '<button class="hint">نسخه پایتون رو کجا تعیین کنم؟</button>' +
         '<button class="hint">می‌خوام جنگو دیپلوی کنم</button>' +
         '<button class="hint">خطا: could not install packages</button>' +
+        '<button class="hint">قدم به قدم دیپلوی رو راهنمایی کن</button>' +
       "</div>" +
     "</div>";
 }
@@ -267,14 +272,17 @@ function addMessage(who, cls = "") {
   wrap.className = "msg " + cls;
   wrap.innerHTML =
     '<div class="who">' + who + "</div>" +
-    '<div class="tools"></div><div class="bubble"></div>' +
-    '<div class="sources"></div><div class="meta"></div>';
+    '<div class="tools"></div><div class="flow"></div><div class="bubble"></div>' +
+    '<div class="sources"></div><div class="suggestions"></div>' +
+    '<div class="meta"></div>';
   messagesEl.appendChild(wrap);
   scrollDown();
   return {
     tools: wrap.querySelector(".tools"),
+    flow: wrap.querySelector(".flow"),
     bubble: wrap.querySelector(".bubble"),
     sources: wrap.querySelector(".sources"),
+    suggestions: wrap.querySelector(".suggestions"),
     meta: wrap.querySelector(".meta"),
   };
 }
@@ -282,7 +290,16 @@ function addMessage(who, cls = "") {
 const TOOL_LABELS = {
   understand: "درک سؤال", search_docs: "جستجوی مستندات",
   list_variants: "بررسی روش‌های موجود", diagnose_error: "تحلیل خطا",
+  flow_step: "قدم فرآیند",
 };
+
+const FLOW_STATUS_LABELS = {
+  completed: "تمام شد", exited: "متوقف شد",
+};
+
+function faNum(value) {
+  return Number(value).toLocaleString("fa-IR");
+}
 
 function renderTool(container, ev) {
   const id = "tool-" + ev.name + "-" + (ev.status === "done" ? "" : ev.detail || "");
@@ -296,6 +313,57 @@ function renderTool(container, ev) {
   }
   el.className = "tool " + ev.status;
   el.textContent = (TOOL_LABELS[ev.name] || ev.name) + (ev.detail ? " — " + ev.detail : "");
+  scrollDown();
+}
+
+/* نقشه‌ی فرآیند — کاربر باید ببیند کجای مسیر ایستاده، نه فقط متن قدم را. */
+function renderFlow(container, data) {
+  if (!data || !data.steps || !data.steps.length) return;
+  const finished = data.status === "completed" || data.status === "exited";
+  const count = finished
+    ? FLOW_STATUS_LABELS[data.status]
+    : "قدم " + faNum(data.step) + " از " + faNum(data.total);
+
+  container.className = "flow" + (finished ? " finished" : "");
+  container.innerHTML =
+    '<div class="flow-head">' +
+      '<span class="flow-title">' + escapeHtml(data.title) + "</span>" +
+      '<span class="flow-count">' + escapeHtml(count) + "</span>" +
+    "</div>" +
+    '<ol class="flow-steps">' +
+      data.steps.map(step =>
+        '<li class="' + escapeHtml(step.status) + '">' +
+          '<span class="flow-dot" aria-hidden="true"></span>' +
+          '<span class="flow-step-title">' + escapeHtml(step.title) + "</span>" +
+        "</li>"
+      ).join("") +
+    "</ol>";
+  scrollDown();
+}
+
+/* چیپ‌های «قدم بعدی». فقط روی آخرین پاسخ می‌مانند تا صفحه شلوغ نشود. */
+function clearOldSuggestions() {
+  messagesEl.querySelectorAll(".suggestions").forEach(el => { el.innerHTML = ""; });
+}
+
+function renderSuggestions(container, items) {
+  if (!items || !items.length) {
+    container.innerHTML = "";
+    return;
+  }
+  container.innerHTML =
+    '<div class="label">قدم بعدی</div>' +
+    '<div class="chips">' +
+      items.map(item =>
+        '<button class="suggestion' +
+          (item.kind === "flow" ? " flow-chip" : "") +
+          (item.kind === "step" ? " step-chip" : "") +
+          '" data-prompt="' + escapeHtml(item.prompt) + '">' +
+          (item.kind === "flow" ? "🧭 " : "") +
+          escapeHtml(item.label) +
+        "</button>"
+      ).join("") +
+    "</div>";
   scrollDown();
 }
 
@@ -317,6 +385,7 @@ async function ask(message) {
   busy = true;
   sendEl.disabled = true;
   newChatEl.disabled = true;
+  clearOldSuggestions();
   addMessage("شما", "user").bubble.textContent = message;
   const ui = addMessage("دستیار");
   let answer = "";
@@ -330,8 +399,12 @@ async function ask(message) {
         scrollDown();
       } else if (ev.event === "tool") {
         renderTool(ui.tools, data);
+      } else if (ev.event === "flow") {
+        renderFlow(ui.flow, data);
       } else if (ev.event === "sources") {
         renderSources(ui.sources, data.items);
+      } else if (ev.event === "suggestions") {
+        renderSuggestions(ui.suggestions, data.items);
       } else if (ev.event === "done") {
         ui.meta.textContent =
           Number(data.tokens_used).toLocaleString("fa-IR") + " توکن · " +
@@ -383,7 +456,12 @@ inputEl.addEventListener("keydown", event => {
 });
 
 messagesEl.addEventListener("click", event => {
-  if (event.target.classList.contains("hint")) ask(event.target.textContent);
+  if (event.target.classList.contains("hint")) {
+    ask(event.target.textContent);
+    return;
+  }
+  const chip = event.target.closest(".suggestion");
+  if (chip && !busy) ask(chip.dataset.prompt);
 });
 
 listEl.addEventListener("click", event => {

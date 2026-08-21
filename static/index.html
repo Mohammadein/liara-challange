@@ -107,6 +107,56 @@
   }
   .src:hover { border-color: var(--accent); }
   .src .sec { color: var(--muted); }
+  /* نقشه فرآیند چندمرحله‌ای */
+  .flow:empty { display: none; }
+  .flow {
+    background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 12px; padding: 11px 13px; margin-bottom: 9px;
+  }
+  .flow.finished { opacity: .72; }
+  .flow-head {
+    display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap;
+    margin-bottom: 9px;
+  }
+  .flow-title { font-size: 12.5px; font-weight: 600; }
+  .flow-count {
+    margin-right: auto; font-size: 10.5px; color: var(--muted);
+    border: 1px solid var(--border); border-radius: 999px; padding: 1px 9px;
+    white-space: nowrap;
+  }
+  .flow-steps { list-style: none; margin: 0; padding: 0; }
+  .flow-steps li {
+    display: flex; align-items: flex-start; gap: 9px;
+    font-size: 12px; color: var(--muted); line-height: 1.7; padding: 2px 0;
+  }
+  .flow-dot {
+    flex: 0 0 auto; width: 15px; height: 15px; margin-top: 5px;
+    border-radius: 50%; border: 1.5px solid var(--border);
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 9px; line-height: 1;
+  }
+  .flow-steps li.done .flow-dot {
+    border-color: #3ddc84; background: #14311f; color: #3ddc84;
+  }
+  .flow-steps li.done .flow-dot::before { content: "✓"; }
+  .flow-steps li.current { color: var(--text); font-weight: 600; }
+  .flow-steps li.current .flow-dot {
+    border-color: var(--accent); background: var(--accent);
+    box-shadow: 0 0 0 3px #2196f333;
+  }
+  /* چیپ‌های قدم بعدی */
+  .suggestions:empty { display: none; }
+  .suggestions { margin-top: 13px; }
+  .suggestions .label { font-size: 11px; color: var(--muted); margin-bottom: 7px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 7px; }
+  .suggestion {
+    font-size: 12px; color: var(--text); background: var(--panel-2);
+    border: 1px solid var(--border); border-radius: 999px;
+    padding: 6px 13px; text-align: right; max-width: 100%;
+  }
+  .suggestion:hover { border-color: var(--accent); background: #202a38; }
+  .suggestion.flow-chip { border-color: #3b77a8; background: #18293a; }
+  .suggestion.step-chip { border-style: dashed; }
   .meta { font-size: 10px; color: var(--muted); margin-top: 8px; }
   .err { border-color: #7f2b2b; background: #2a1414; color: #ffb4b4; }
   .empty {

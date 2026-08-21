@@ -17,6 +17,7 @@ from dataclasses import asdict, dataclass, field, is_dataclass
 from pathlib import Path
 from typing import Any
 
+from app.flows import FlowState
 from app.settings import settings
 
 MAX_CONTEXT_TURNS = 6
@@ -40,6 +41,9 @@ class Session:
     service: str | None = None
     variant: str | None = None
     profile: object | None = None
+    # فرآیند چندمرحله‌ای در جریان. کنار پروفایل می‌ماند نه در حافظه‌ی موقت،
+    # چون کاربر ممکن است قدم سوم را فردا ادامه بدهد.
+    flow: FlowState | None = None
     created_at: float = field(default_factory=time.time)
     touched: float = field(default_factory=time.time)
     _store: "SessionStore | None" = field(default=None, repr=False, compare=False)
@@ -50,11 +54,13 @@ class Session:
         content: str,
         *,
         sources: list[dict[str, Any]] | None = None,
+        suggestions: list[dict[str, Any]] | None = None,
     ) -> None:
         message = {
             "role": role,
             "content": content,
             "sources": sources or [],
+            "suggestions": suggestions or [],
             "created_at": time.time(),
         }
         self.turns.append(message)
@@ -132,6 +138,19 @@ class SessionStore:
                     ON messages(session_id, id);
                 """
             )
+            # مهاجرت درجا برای دیتابیس‌هایی که قبل از افزوده‌شدن فرآیند و
+            # پیشنهادها ساخته شده‌اند. بدون این، یک دیپلوی روی دیسک موجود با
+            # «no such column» می‌افتد.
+            self._add_column(conn, "sessions", "flow_json", "TEXT")
+            self._add_column(
+                conn, "messages", "suggestions_json", "TEXT NOT NULL DEFAULT '[]'"
+            )
+
+    @staticmethod
+    def _add_column(conn: sqlite3.Connection, table: str, column: str, decl: str) -> None:
+        existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
 
     @staticmethod
     def _profile_from_json(raw: str | None) -> object | None:
@@ -151,23 +170,46 @@ class SessionStore:
             return json.dumps(asdict(profile), ensure_ascii=False)
         return None
 
+    @staticmethod
+    def _flow_from_json(raw: str | None) -> FlowState | None:
+        if not raw:
+            return None
+        try:
+            return FlowState.from_dict(json.loads(raw))
+        except Exception:
+            return None
+
+    @staticmethod
+    def _flow_to_json(flow: FlowState | None) -> str | None:
+        return json.dumps(flow.as_dict(), ensure_ascii=False) if flow else None
+
     def _row_to_session(self, row: sqlite3.Row, turns: list[dict]) -> Session:
         return Session(
             id=row["id"], owner_id=row["owner_id"], title=row["title"],
             turns=turns, service=row["service"], variant=row["variant"],
             profile=self._profile_from_json(row["profile_json"]),
+            flow=self._flow_from_json(self._column(row, "flow_json")),
             created_at=row["created_at"], touched=row["updated_at"], _store=self,
         )
 
     @staticmethod
-    def _message_from_row(row: sqlite3.Row) -> dict[str, Any]:
-        try:
-            sources = json.loads(row["sources_json"] or "[]")
-        except json.JSONDecodeError:
-            sources = []
+    def _column(row: sqlite3.Row, name: str) -> Any:
+        return row[name] if name in row.keys() else None
+
+    @classmethod
+    def _message_from_row(cls, row: sqlite3.Row) -> dict[str, Any]:
+        def parse(raw: str | None) -> list:
+            try:
+                value = json.loads(raw or "[]")
+            except json.JSONDecodeError:
+                return []
+            return value if isinstance(value, list) else []
+
         return {
             "id": row["id"], "role": row["role"], "content": row["content"],
-            "sources": sources, "created_at": row["created_at"],
+            "sources": parse(row["sources_json"]),
+            "suggestions": parse(cls._column(row, "suggestions_json")),
+            "created_at": row["created_at"],
         }
 
     def create(self, owner_id: str, session_id: str | None = None) -> Session:
@@ -226,31 +268,33 @@ class SessionStore:
     def add_message(self, session: Session, message: dict[str, Any]) -> None:
         with self._lock, self._connect() as conn:
             conn.execute(
-                "INSERT INTO messages(session_id, role, content, sources_json, created_at) "
-                "VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO messages(session_id, role, content, sources_json, "
+                "suggestions_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
                 (session.id, message["role"], message["content"],
                  json.dumps(message.get("sources", []), ensure_ascii=False),
+                 json.dumps(message.get("suggestions", []), ensure_ascii=False),
                  message["created_at"]),
             )
             if message["role"] == "user" and session.title == DEFAULT_TITLE:
                 title = re.sub(r"\s+", " ", message["content"]).strip()[:60]
                 session.title = title or DEFAULT_TITLE
-            conn.execute(
-                "UPDATE sessions SET title = ?, service = ?, variant = ?, "
-                "profile_json = ?, updated_at = ? WHERE id = ?",
-                (session.title, session.service, session.variant,
-                 self._profile_to_json(session.profile), message["created_at"], session.id),
-            )
+            self._write_state(conn, session, message["created_at"])
 
     def save_state(self, session: Session) -> None:
         session.touched = time.time()
         with self._lock, self._connect() as conn:
-            conn.execute(
-                "UPDATE sessions SET title = ?, service = ?, variant = ?, "
-                "profile_json = ?, updated_at = ? WHERE id = ?",
-                (session.title, session.service, session.variant,
-                 self._profile_to_json(session.profile), session.touched, session.id),
-            )
+            self._write_state(conn, session, session.touched)
+
+    def _write_state(
+        self, conn: sqlite3.Connection, session: Session, when: float,
+    ) -> None:
+        conn.execute(
+            "UPDATE sessions SET title = ?, service = ?, variant = ?, "
+            "profile_json = ?, flow_json = ?, updated_at = ? WHERE id = ?",
+            (session.title, session.service, session.variant,
+             self._profile_to_json(session.profile),
+             self._flow_to_json(session.flow), when, session.id),
+        )
 
     def list(self, owner_id: str, limit: int = 100) -> list[dict[str, Any]]:
         with self._lock, self._connect() as conn:

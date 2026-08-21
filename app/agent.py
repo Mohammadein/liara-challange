@@ -21,21 +21,38 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
+from app import flows, suggest
 from app.contracts import (
     DoneEvent,
     ErrorEvent,
+    FlowEvent,
     Source,
     SourcesEvent,
+    Suggestion,
+    SuggestionsEvent,
     TokenEvent,
     ToolEvent,
     sse,
 )
+from app.flows import (
+    DATABASE_ENGINE_ALIASES,
+    DATABASE_URL_SLUGS,
+    PROFILE_DATABASE_NAMES,
+    FlowState,
+)
 from app.llm import LLMUnavailable, aclient
-from app.prompts import ANSWER_SYSTEM, PLAN_SYSTEM, REWRITE_SYSTEM, build_context
+from app.prompts import (
+    ANSWER_SYSTEM,
+    FLOW_STEP_SYSTEM,
+    PLAN_SYSTEM,
+    REWRITE_SYSTEM,
+    build_context,
+)
 from app.retrieval import Hit, Retriever
 from app.tools import TOOL_SPECS, ToolBox
 from app.session import Session, sessions
@@ -56,27 +73,16 @@ _DATABASE_ACTIONS = (
     "راه اندازی", "مستقر", "دیپلوی", "deploy", "نصب", "ایجاد", "ساخت",
     "بساز", "وصل", "اتصال", "connect", "بکاپ", "backup", "بازیابی", "restore",
 )
-_DATABASE_ENGINE_ALIASES = {
-    "PostgreSQL": ("postgresql", "postgres", "پستگرس", "پستگری"),
-    "MySQL": ("mysql", "my sql", "مای اس کیو ال", "مای اسکیوال"),
-    "MariaDB": ("mariadb", "maria db", "ماریا دی بی", "ماریا"),
-    "MongoDB": ("mongodb", "mongo", "مونگو"),
-    "Redis": ("redis", "ردیس"),
-    "SQL Server": ("mssql", "sql server", "sqlserver", "اس کیو ال سرور"),
-    "Elasticsearch": ("elasticsearch", "elastic search", "الاستیک"),
-    "RabbitMQ": ("rabbitmq", "rabbit mq", "ربیت ام کیو", "ربیت"),
-    "SQLite": ("sqlite", "اس کیو لایت"),
-}
-_PROFILE_DATABASE_NAMES = {
-    "postgresql": "PostgreSQL", "mysql": "MySQL", "mariadb": "MariaDB",
-    "mongodb": "MongoDB", "redis": "Redis", "mssql": "SQL Server",
-    "elasticsearch": "Elasticsearch", "rabbitmq": "RabbitMQ", "sqlite": "SQLite",
-}
-_DATABASE_URL_SLUGS = {
-    "PostgreSQL": "postgresql", "MySQL": "mysql", "MariaDB": "mariadb",
-    "MongoDB": "mongodb", "Redis": "redis", "SQL Server": "mssql",
-    "Elasticsearch": "elastic-search", "RabbitMQ": "rabbitmq",
-}
+# نگاشت‌های دیتابیس در app/flows.py زندگی می‌کنند: هم مسیریابی سؤال (همین
+# فایل) و هم فرآیند «راه‌اندازی دیتابیس» به آن‌ها نیاز دارند و دو نسخه‌ی
+# جداگانه دیر یا زود از هم جدا می‌افتند.
+_DATABASE_ENGINE_ALIASES = DATABASE_ENGINE_ALIASES
+_PROFILE_DATABASE_NAMES = PROFILE_DATABASE_NAMES
+_DATABASE_URL_SLUGS = DATABASE_URL_SLUGS
+# نام هر موتور دیتابیس، صاف‌شده — برای تست «این پیام درباره‌ی دیتابیس است؟»
+DATABASE_ENGINE_ALIASES_FLAT = tuple(
+    alias for aliases in DATABASE_ENGINE_ALIASES.values() for alias in aliases
+)
 _DATABASE_SETUP_ACTIONS = (
     "راه اندازی", "مستقر", "دیپلوی", "deploy", "نصب", "ایجاد", "ساخت", "بساز",
 )
@@ -185,6 +191,85 @@ def liara_cli_route(
     return None
 
 
+_DEPLOY_INTENTS = (
+    "دیپلوی", "استقرار", "مستقر", "deploy", "بیارم بالا", "بالا بیارم",
+    "بیاورم بالا", "بالا بیاورم", "راه اندازی", "اجرا کنم", "میزبانی",
+    "هاست کنم", "منتشر کنم",
+)
+
+# اگر پیام درباره‌ی سرویس دیگری است، «استقرار برنامه» جواب آن نیست.
+#
+# بدون این تست یک رگرسیون واقعی داشتیم: کاربری با پروفایل Django که
+# می‌پرسید «دیتابیس رو چطور راه بندازم؟» به صفحه‌ی استقرار Django هدایت
+# می‌شد، چون هم پلتفرم معلوم بود و هم «راه اندازی» یک نیت استقرار است.
+_NON_PAAS_TERMS = (
+    "دیتابیس", "پایگاه داده", "database", " db ", "باکت", "bucket",
+    "object storage", "ذخیره سازی", "دامنه", "dns", "ایمیل", "email",
+    "کرون", "cron", "دیسک", "disk", "شبکه خصوصی",
+)
+
+# پلتفرم پروفایل فقط وقتی به کار می‌آید که پیام واقعاً درباره‌ی «خود برنامه»
+# باشد، نه هر جمله‌ای که فعل راه‌اندازی دارد.
+_APP_NOUNS = (
+    "برنامه", "اپ", "اپلیکیشن", "سرویس", "سایت", "پروژه", "app",
+)
+
+
+def platform_deploy_route(
+    question: str, session: Session,
+) -> tuple[str, str, str] | None:
+    """
+    «می‌خوام X رو بیارم بالا» وقتی X یک پلتفرم شناخته‌شده است.
+
+    این مسیر قاعده‌محور است چون کاربر **قبلاً جواب داده**. وقتی کسی می‌گوید
+    «سرویس مبتنی بر داکر»، پلتفرم معلوم است و پرسیدن «چه نوع سرویسی؟» یعنی
+    حرفش شنیده نشده. مدل بازنویسی گاهی این را ابهام می‌بیند؛ اینجا جلویش
+    گرفته می‌شود.
+    """
+    from app.flows import _detect_platform
+    from app.project import PLATFORMS
+
+    current = f" {normalize(question)} "
+    if any(term in current for term in _NON_PAAS_TERMS):
+        return None
+    if not any(term in current for term in _DEPLOY_INTENTS):
+        return None
+    if any(term in current for term in DATABASE_ENGINE_ALIASES_FLAT):
+        return None
+
+    # پلتفرمی که در همین پیام آمده، بر پروفایل مقدم است — کاربر ممکن است
+    # درباره‌ی پروژه‌ی دومش بپرسد.
+    platform = _detect_platform(current)
+    if not platform and any(noun in current for noun in _APP_NOUNS):
+        platform = getattr(session.profile, "platform", None)
+    if not platform:
+        return None
+
+    # برچسب فهرست فرم توضیح داخل پرانتز دارد («Docker (هر چیز دیگر)») که در
+    # یک کوئری جستجو فقط نویز است.
+    label = re.sub(r"\s*\(.*?\)", "", PLATFORMS.get(platform, platform)).strip()
+    return (
+        f"استقرار برنامه {label} در لیارا",
+        "paas",
+        f"/paas/{platform}/",
+    )
+
+
+def usable_clarification(clarify: str | None, options: list[str]) -> bool:
+    """
+    آیا این سؤال تکمیلی ارزش یک رفت‌وبرگشت را دارد؟
+
+    معیار: باید گزینه داشته باشد. سؤال بی‌گزینه («چه نوع سرویسی می‌خواهید؟»)
+    کار را به کاربر پس می‌دهد بدون اینکه بگوید جواب‌های ممکن چیست — و کاربر
+    دقیقاً همان چیزی را دوباره می‌نویسد که بار اول نوشته بود.
+
+    این تست اینجاست نه فقط در پرامپت: پرامپت یک درخواست است، این یک تضمین.
+    """
+    if not clarify or not clarify.strip():
+        return False
+    return len([o for o in options if str(o).strip()]) >= 2
+
+
 def database_clarification(question: str, session: Session) -> str | None:
     """Ask for the engine before engine-specific database instructions.
 
@@ -229,10 +314,13 @@ def index_ready() -> bool:
 
 async def rewrite(question: str, session: Session) -> dict:
     """
-    سؤال → {query, service, clarify}
+    سؤال → {query, service, clarify, options}
 
     اگر مدل کوچک خطا داد یا JSON بی‌ربط برگرداند، به خود سؤال برمی‌گردیم.
     یک بازنویسی ناموفق نباید کل پاسخ را از بین ببرد.
+
+    `options` گزینه‌های سؤال تکمیلی‌اند. سؤال تکمیلی بدون گزینه اصلاً منتشر
+    نمی‌شود — به `usable_clarification` مراجعه کنید.
     """
     deterministic_clarification = database_clarification(question, session)
     if deterministic_clarification:
@@ -240,6 +328,10 @@ async def rewrite(question: str, session: Session) -> dict:
             "query": "راه‌اندازی دیتابیس در لیارا",
             "service": "dbaas",
             "clarify": deterministic_clarification,
+            "options": [
+                "PostgreSQL", "MySQL", "MariaDB", "MongoDB",
+                "Redis", "SQL Server", "Elasticsearch", "RabbitMQ",
+            ],
             "tokens": 0,
         }
 
@@ -267,6 +359,16 @@ async def rewrite(question: str, session: Session) -> dict:
             "tokens": 0, "canonical": True, "url_prefix": url_prefix,
         }
 
+    # آخرین مسیر قاعده‌محور، عمداً: عام‌ترین‌شان است و نباید جلوی مسیرهای
+    # دقیق‌تر (دیتابیس، نسخه‌ی پایتون، CLI) را بگیرد.
+    deterministic_platform = platform_deploy_route(question, session)
+    if deterministic_platform:
+        query, service, url_prefix = deterministic_platform
+        return {
+            "query": query, "service": service, "clarify": None,
+            "tokens": 0, "canonical": True, "url_prefix": url_prefix,
+        }
+
     history = session.transcript()
     user = f"مکالمه تا اینجا:\n{history}\n\nسؤال جدید: {question}" if history else question
 
@@ -279,7 +381,9 @@ async def rewrite(question: str, session: Session) -> dict:
             ],
             response_format={"type": "json_object"},
             temperature=0,
-            max_tokens=200,
+            # ۳۰۰ نه ۲۰۰: حالا `options` هم در همین JSON می‌آید و بریده شدن
+            # خروجی یعنی JSON ناقص و افتادن به مسیر پشتیبان.
+            max_tokens=300,
         )
         data = json.loads(resp.choices[0].message.content or "{}")
         usage = resp.usage.total_tokens if resp.usage else 0
@@ -287,10 +391,22 @@ async def rewrite(question: str, session: Session) -> dict:
         log.warning("rewrite failed (%s), falling back to raw question", type(exc).__name__)
         return {"query": question, "service": None, "clarify": None, "tokens": 0}
 
+    clarify = (data.get("clarify") or "").strip() or None
+    raw_options = data.get("options")
+    options = [str(o).strip() for o in raw_options if str(o).strip()] \
+        if isinstance(raw_options, list) else []
+
+    # سؤال تکمیلیِ بی‌گزینه انداخته می‌شود و به جستجوی عادی برمی‌گردیم.
+    # یک پاسخ که چند حالت را پوشش می‌دهد، از یک سؤالِ بن‌بست بهتر است.
+    if clarify and not usable_clarification(clarify, options):
+        log.info("dropped option-less clarification: %r", clarify[:80])
+        clarify, options = None, []
+
     return {
         "query": (data.get("query") or question).strip(),
         "service": data.get("service") or None,
-        "clarify": (data.get("clarify") or None),
+        "clarify": clarify,
+        "options": options,
         "tokens": usage,
     }
 
@@ -399,6 +515,10 @@ async def answer_once(
         search_queries, k=k or settings.top_k, service=service,
         url_prefix=plan.get("url_prefix"),
     )
+    if not hits and plan.get("url_prefix"):
+        hits = retriever.search(
+            search_queries, k=k or settings.top_k, service=service,
+        )
 
     resp = await aclient().chat.completions.create(
         model=settings.model_answer,
@@ -513,6 +633,221 @@ def _tool_detail(name: str, raw_result: str) -> str:
     return ""
 
 
+# ------------------------------------------------------------ فرآیند چندمرحله‌ای
+
+def flow_decision(
+    question: str, session: Session,
+) -> tuple[str, flows.Flow, FlowState] | None:
+    """
+    آیا این نوبت مکالمه، یک حرکت در فرآیند است؟
+
+    خروجی: (کنش، فرآیند، وضعیت) یا None برای مسیر عادی پاسخ‌دهی.
+
+    ترتیب بررسی مهم است: «خروج» قبل از «بعدی» می‌آید چون «بی‌خیال فرآیند»
+    هم واژه‌ی فرآیند دارد هم می‌تواند با ادامه اشتباه گرفته شود.
+    """
+    state = session.flow
+    flow = flows.flow_by_id(state.id) if state else None
+
+    if state and flow:
+        if flows.exit_intent(question):
+            return "exit", flow, state
+        if flows.next_intent(question):
+            return "next", flow, state
+        if flows.previous_intent(question):
+            return "prev", flow, state
+        if flows.restate_intent(question):
+            return "stay", flow, state
+        # سؤال آزاد وسط فرآیند: مسیر عادی جواب می‌دهد، ولی stepper باقی
+        # می‌ماند. پرت کردن کاربر از سؤالش به قدم بعدی، کمک نیست.
+        return None
+
+    matched = flows.match_flow(question)
+    if matched:
+        return "start", matched, FlowState(id=matched.id)
+    return None
+
+
+def _flow_search(
+    step: flows.ResolvedStep, session: Session, question: str, extra: bool,
+) -> list[Hit]:
+    """
+    بازیابی برای یک قدم — با فیلتر مسیر، و بدون آن اگر چیزی نگرفت.
+
+    فیلتر مسیر **نرم** است چون مسیرهای مستندات عوض می‌شوند. یک قدم خالی در
+    وسط فرآیند بدتر از یک قدم با منبع کمی عام‌تر است.
+    """
+    retriever = get_retriever()
+    profile = session.profile
+    queries = [step.query]
+    if extra:
+        queries.append(question)
+    variant = session.variant or (profile.variant_hint if profile else None)
+
+    hits = retriever.search(
+        queries, k=settings.top_k, service=step.service,
+        variant=variant, url_prefix=step.url_prefix,
+    )
+    if not hits and step.url_prefix:
+        hits = retriever.search(
+            queries, k=settings.top_k, service=step.service, variant=variant,
+        )
+    return hits
+
+
+def _advance(state: FlowState, steps: list[flows.ResolvedStep], action: str) -> str:
+    """وضعیت را جابه‌جا می‌کند و برچسب رویداد را برمی‌گرداند."""
+    if action == "start":
+        state.step = 0
+        state.done = []
+        return "started"
+
+    if action == "next":
+        if state.step < len(steps):
+            key = steps[state.step].key
+            if key not in state.done:
+                state.done.append(key)
+        state.step += 1
+        return "advanced"
+
+    if action == "prev":
+        state.step = max(0, state.step - 1)
+        # قدم‌هایی که به آن‌ها برگشته‌ایم دیگر «انجام‌شده» نیستند، وگرنه
+        # stepper چیزی نشان می‌دهد که با جایی که کاربر ایستاده جور نیست.
+        keys_ahead = {s.key for s in steps if s.index > state.step}
+        state.done = [k for k in state.done if k not in keys_ahead]
+        return "advanced"
+
+    return "advanced"
+
+
+async def flow_stream(
+    question: str,
+    session: Session,
+    action: str,
+    flow: flows.Flow,
+    state: FlowState,
+    counter: dict[str, int],
+) -> AsyncIterator[str]:
+    """یک نوبت از فرآیند: یک قدم، با متن بازیابی‌شده‌ی همان قدم."""
+    ctx = flows.build_context(session.profile, question)
+    steps = flows.resolve(flow, ctx)
+
+    # --- خروج ---
+    if action == "exit":
+        session.flow = None
+        session.save()
+        yield sse("flow", FlowEvent(
+            **flows.progress_payload(flow, steps, state, "exited")))
+        message = (
+            f"از فرآیند «{flow.title}» خارج شدیم. "
+            "هر وقت خواستی از همان قدم ادامه بدهیم، بگو."
+        )
+        for word in message.split(" "):
+            yield sse("token", TokenEvent(t=word + " "))
+        session.add("user", question)
+        session.add("assistant", message)
+        return
+
+    status = _advance(state, steps, action)
+
+    # --- پایان فرآیند ---
+    if state.step >= len(steps):
+        session.flow = None
+        session.save()
+        yield sse("flow", FlowEvent(
+            **flows.progress_payload(flow, steps, state, "completed")))
+        checklist = "\n".join(f"- {s.title}" for s in steps)
+        message = (
+            f"فرآیند «{flow.title}» تمام شد. چیزی که پشت سر گذاشتی:\n\n"
+            f"{checklist}\n\n"
+            "اگر جایی از این مسیر گیر کردی، همان قدم را اسم ببر تا برگردیم."
+        )
+        for word in message.split(" "):
+            yield sse("token", TokenEvent(t=word + " "))
+        session.add("user", question)
+        session.add("assistant", message)
+        yield sse("suggestions", SuggestionsEvent(items=[]))
+        return
+
+    step = steps[state.step]
+    session.flow = state
+    if step.service:
+        session.service = step.service
+    session.save()
+
+    yield sse("flow", FlowEvent(
+        **flows.progress_payload(flow, steps, state, status)))
+    yield sse("tool", ToolEvent(
+        name="flow_step", status="done",
+        detail=f"قدم {step.index} از {len(steps)} — {step.title}",
+    ))
+    yield sse("tool", ToolEvent(
+        name="search_docs", status="running", detail=step.query))
+
+    hits = _flow_search(step, session, question, extra=(action == "stay"))
+    yield sse("tool", ToolEvent(
+        name="search_docs", status="done", detail=f"{len(hits)} نتیجه"))
+
+    system = (
+        FLOW_STEP_SYSTEM
+        + f"\n\n## Procedure\n«{flow.title}» — {flow.summary}\n\n"
+        + "## Outline (fixed, do not change)\n"
+        + flows.outline(steps, step.index)
+        + f"\n\n## Current step\n{step.index} از {len(steps)}: {step.title}\n"
+        + f"هدف این قدم: {step.goal}\n"
+        + (f"صفحه مرجع این قدم: {step.url}\n" if step.url else "")
+    )
+    if state.done:
+        titles = [s.title for s in steps if s.key in state.done]
+        system += "\n## Already done\n" + "، ".join(titles) + "\n"
+    if session.profile:
+        system += "\n## This user's project\n" + session.profile.as_context()
+
+    user = (
+        f"# متن مستندات\n\n{build_context(hits)}\n\n"
+        f"# پیام کاربر\n\n{question}"
+    )
+
+    answer = ""
+    stream = await aclient().chat.completions.create(
+        model=settings.model_answer,
+        messages=[
+            {"role": "system", "content": system},
+            *session.history(),
+            {"role": "user", "content": user},
+        ],
+        temperature=0.2,
+        max_tokens=900,
+        stream=True,
+        stream_options={"include_usage": True},
+    )
+    async for part in stream:
+        if part.usage:
+            counter["tokens"] += part.usage.total_tokens
+        if not part.choices:
+            continue
+        delta = part.choices[0].delta
+        if delta.content:
+            answer += delta.content
+            yield sse("token", TokenEvent(t=delta.content))
+
+    stored_sources = _sources(hits)
+    if stored_sources:
+        yield sse("sources", SourcesEvent(items=stored_sources))
+
+    items = suggest.for_flow(flow, steps, step.index)
+    yield sse("suggestions", SuggestionsEvent(items=items))
+
+    session.add("user", question)
+    session.add(
+        "assistant", answer,
+        sources=[source.model_dump() for source in stored_sources],
+        suggestions=[item.model_dump() for item in items],
+    )
+    session.save()
+
+
 # ------------------------------------------------------------ حلقه اصلی
 
 async def chat_stream(
@@ -525,6 +860,28 @@ async def chat_stream(
     tokens_used = 0
 
     try:
+        # --- ۰. فرآیند چندمرحله‌ای ---
+        #
+        # قبل از بازنویسی، چون «قدم بعد» سؤال نیست و نه بازنویسی لازم دارد
+        # نه جستجوی آزاد؛ قدم بعدی از قبل معلوم است.
+        decision = flow_decision(question, session)
+        if decision:
+            action, flow, state = decision
+            counter = {"tokens": 0}
+            async for event in flow_stream(
+                question, session, action, flow, state, counter
+            ):
+                yield event
+            log.info(
+                "flow session=%s id=%s action=%s step=%d tokens=%d",
+                session_id, flow.id, action, state.step, counter["tokens"],
+            )
+            yield sse("done", DoneEvent(
+                tokens_used=counter["tokens"], cached=False,
+                latency_ms=int((time.perf_counter() - started) * 1000),
+            ))
+            return
+
         # --- ۱. بازنویسی ---
         yield sse("tool", ToolEvent(
             name="understand", status="running", detail="در حال درک سؤال"
@@ -538,10 +895,23 @@ async def chat_stream(
                                         detail="نیاز به توضیح بیشتر"))
             for word in plan["clarify"].split(" "):
                 yield sse("token", TokenEvent(t=word + " "))
+
+            # گزینه‌ها به چیپ تبدیل می‌شوند تا سؤال تکمیلی بن‌بست نباشد:
+            # کاربر یک کلیک جواب می‌دهد، نه یک تایپ دوباره.
+            items = [
+                Suggestion(label=option[:80], prompt=option[:300], kind="ask")
+                for option in plan.get("options", [])
+            ]
+            if items:
+                yield sse("suggestions", SuggestionsEvent(items=items))
+
             if plan["service"]:
                 session.service = plan["service"]
             session.add("user", question)
-            session.add("assistant", plan["clarify"])
+            session.add(
+                "assistant", plan["clarify"],
+                suggestions=[item.model_dump() for item in items],
+            )
             yield sse("done", DoneEvent(
                 tokens_used=tokens_used, cached=False,
                 latency_ms=int((time.perf_counter() - started) * 1000),
@@ -550,6 +920,17 @@ async def chat_stream(
 
         yield sse("tool", ToolEvent(name="understand", status="done",
                                     detail=plan["query"]))
+
+        # سؤال آزاد وسط یک فرآیند فعال: به سؤالش جواب می‌دهیم، ولی stepper
+        # باید سر جایش بماند وگرنه کاربر فکر می‌کند فرآیند لغو شده.
+        active_flow = flows.flow_by_id(session.flow.id) if session.flow else None
+        active_steps: list[flows.ResolvedStep] = []
+        if active_flow and session.flow:
+            active_steps = flows.resolve(
+                active_flow, flows.build_context(session.profile, question)
+            )
+            yield sse("flow", FlowEvent(**flows.progress_payload(
+                active_flow, active_steps, session.flow, "advanced")))
 
         # --- ۳. بازیابی ---
         yield sse("tool", ToolEvent(name="search_docs", status="running",
@@ -563,11 +944,20 @@ async def chat_stream(
         if profile and profile.platform:
             queries.append(f"{plan['query']} {profile.platform}")
 
+        variant = session.variant or (profile.variant_hint if profile else None)
         hits = get_retriever().search(
-            queries, k=settings.top_k, service=service,
-            variant=session.variant or (profile.variant_hint if profile else None),
+            queries, k=settings.top_k, service=service, variant=variant,
             url_prefix=plan.get("url_prefix"),
         )
+        # فیلتر مسیر سخت است و اگر مسیری در مستندات عوض شده باشد صفر نتیجه
+        # می‌دهد — و کاربر «در مستندات پیدا نشد» می‌گیرد در حالی که مطلب
+        # هست. یک بار بدون فیلتر دوباره می‌گردیم.
+        if not hits and plan.get("url_prefix"):
+            log.info("url_prefix %s matched nothing, retrying unfiltered",
+                     plan["url_prefix"])
+            hits = get_retriever().search(
+                queries, k=settings.top_k, service=service, variant=variant,
+            )
 
         if service:
             session.service = service
@@ -676,10 +1066,27 @@ async def chat_stream(
             stored_sources = _sources(box.collected)
             yield sse("sources", SourcesEvent(items=stored_sources))
 
+        # --- ۶. قدم بعدی ---
+        #
+        # بعد از منابع فرستاده می‌شود نه قبل از پاسخ: کاربر باید اول جوابش را
+        # ببیند. اگر این تماس شکست بخورد، `next_steps` خودش پشتیبان قطعی
+        # برمی‌گرداند و هیچ‌وقت استثنا پرتاب نمی‌کند.
+        if active_flow and session.flow:
+            items = suggest.for_flow(
+                active_flow, active_steps, session.flow.step + 1)
+        else:
+            items, suggest_tokens = await suggest.next_steps(
+                question, answer, box.collected, active_flow=False,
+            )
+            tokens_used += suggest_tokens
+        if items:
+            yield sse("suggestions", SuggestionsEvent(items=items))
+
         session.add("user", question)
         session.add(
             "assistant", answer,
             sources=[source.model_dump() for source in stored_sources],
+            suggestions=[item.model_dump() for item in items],
         )
         session.save()
 
