@@ -26,6 +26,8 @@ import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
+from openai import APIError
+
 from app import flows, suggest
 from app.contracts import (
     DoneEvent,
@@ -46,6 +48,7 @@ from app.flows import (
     FlowState,
 )
 from app.llm import LLMUnavailable, aclient
+from app.observability import metrics
 from app.prompts import (
     ANSWER_SYSTEM,
     FLOW_STEP_SYSTEM,
@@ -1243,12 +1246,21 @@ async def chat_stream(
         ))
 
     except LLMUnavailable as exc:
+        metrics.failure("llm_unavailable")
         log.error("llm unavailable: %s", exc)
         yield sse("error", ErrorEvent(
             message="سرویس هوش مصنوعی در دسترس نیست. لطفاً کمی بعد دوباره تلاش کنید.",
             code="llm_unavailable",
         ))
+    except APIError as exc:
+        metrics.failure("llm_provider")
+        log.error("llm provider error type=%s", type(exc).__name__)
+        yield sse("error", ErrorEvent(
+            message="سرویس هوش مصنوعی در دسترس نیست. لطفاً کمی بعد دوباره تلاش کنید.",
+            code="llm_unavailable",
+        ))
     except Exception:
+        metrics.failure("chat_agent")
         log.exception("chat failed session=%s", session_id)
         yield sse("error", ErrorEvent(
             message="مشکلی در پردازش پیش آمد. لطفاً دوباره تلاش کنید.",

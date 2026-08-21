@@ -12,13 +12,26 @@ import time
 from functools import lru_cache
 
 import numpy as np
-from openai import AsyncOpenAI, OpenAI
+from openai import (
+    APIConnectionError,
+    APITimeoutError,
+    AsyncOpenAI,
+    InternalServerError,
+    OpenAI,
+    RateLimitError,
+)
 
 from app.settings import settings
 
 log = logging.getLogger("app.llm")
 
 MAX_RETRIES = 3
+RETRYABLE_ERRORS = (
+    APIConnectionError,
+    APITimeoutError,
+    InternalServerError,
+    RateLimitError,
+)
 
 
 class LLMUnavailable(RuntimeError):
@@ -31,8 +44,8 @@ def client() -> OpenAI:
         raise LLMUnavailable("کلید یا آدرس سرویس هوش مصنوعی تنظیم نشده است.")
     return OpenAI(
         base_url=settings.liara_ai_base_url,
-        api_key=settings.liara_ai_api_key,
-        timeout=60,
+        api_key=settings.liara_ai_api_key_value,
+        timeout=settings.llm_timeout_seconds,
         max_retries=0,     # تلاش مجدد را خودمان مدیریت می‌کنیم
     )
 
@@ -49,8 +62,8 @@ def aclient() -> AsyncOpenAI:
         raise LLMUnavailable("کلید یا آدرس سرویس هوش مصنوعی تنظیم نشده است.")
     return AsyncOpenAI(
         base_url=settings.liara_ai_base_url,
-        api_key=settings.liara_ai_api_key,
-        timeout=60,
+        api_key=settings.liara_ai_api_key_value,
+        timeout=settings.llm_timeout_seconds,
         max_retries=1,
     )
 
@@ -61,12 +74,16 @@ def _retry(fn, what: str):
     for attempt in range(MAX_RETRIES):
         try:
             return fn()
-        except Exception as exc:
+        except RETRYABLE_ERRORS as exc:
             last = exc
             if attempt < MAX_RETRIES - 1:
                 wait = 2 ** attempt
                 log.warning("%s failed (%s), retrying in %ss", what, type(exc).__name__, wait)
                 time.sleep(wait)
+        except Exception as exc:
+            # 4xxهایی مثل کلید اشتباه یا ورودی بد با retry درست نمی‌شوند.
+            log.error("%s failed permanently (%s)", what, type(exc).__name__)
+            raise LLMUnavailable(f"{what} ناموفق بود.") from exc
     log.error("%s failed after %d attempts: %s", what, MAX_RETRIES, last)
     raise LLMUnavailable(f"{what} ناموفق بود.") from last
 

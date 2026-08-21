@@ -127,9 +127,72 @@ liara deploy
 | `LIARA_AI_API_KEY` | کلید API |
 | `USE_MOCK` | روی `false` |
 | `SESSION_DB_PATH` | مسیر SQLite روی Liara Disk، مثلاً `/data/sessions.db` |
+| `TRUST_PROXY_HEADERS` | روی لیارا `true`؛ پذیرش IP واقعی از proxy قابل اعتماد |
+| `METRICS_TOKEN` | یک مقدار تصادفی بلند برای محافظت از `/metrics` |
 
 برای اینکه تاریخچه با استقرار مجدد پاک نشود، در لیارا یک Disk متصل کنید و
 `SESSION_DB_PATH` را روی مسیر همان Disk قرار دهید.
+
+---
+
+## امنیت، پایداری و Monitoring
+
+### Rate Limiting و کنترل هزینه
+
+- مسیرهای مصرف‌کننده LLM (`/api/chat`، `/api/v1/ask` و ساخت Plan) یک token
+  bucket مشترک با سقف `RATE_LIMIT_PER_MINUTE` دارند. سایر APIها سقف جداگانه
+  `API_RATE_LIMIT_PER_MINUTE` دارند تا خواندن تاریخچه ظرفیت چت را مصرف نکند.
+- پاسخ محدودشده status `429`، کد پایدار `rate_limited`، هدر `Retry-After` و
+  هدرهای `X-RateLimit-*` دارد.
+- `MAX_CONCURRENT_LLM_REQUESTS` نقش bulkhead را دارد: کندشدن سرویس مدل اجازه
+  نمی‌دهد تمام worker اشغال شود. در ازدحام، پاسخ کنترل‌شده `503 service_busy`
+  برمی‌گردد.
+- طول پیام، اندازه body، تعداد دور ابزار، context مکالمه و output token مدل
+  سقف دارند. مصرف واقعی توکن گزارش‌شده توسط provider در metric
+  `liara_llm_tokens_total` جمع می‌شود.
+
+Rate limiter درون حافظه و thread-safe است و با اجرای فعلی تک‌پردازه سازگار است.
+اگر برنامه افقی scale شد، رابط `RateLimiter` باید با backend اشتراکی Redis
+جایگزین شود تا سقف بین replicaها مشترک باشد.
+
+### Secretها
+
+- کلیدها فقط از environment خوانده می‌شوند؛ `.env` هم در `.gitignore` و هم
+  `.dockerignore` است و داخل image نمی‌رود.
+- مقدارهای حساس از نوع `SecretStr` هستند، در repr پنهان می‌مانند و یک redaction
+  filter نهایی جلوی حضور تصادفی‌شان در message یا stack trace را می‌گیرد.
+- با `USE_MOCK=false`، نبودن URL یا API key باعث fail-fast هنگام startup می‌شود؛
+  برنامه با تنظیم ناقص ظاهراً سالم بالا نمی‌آید.
+- کلید واقعی را فقط در Environment Variables کنسول لیارا ثبت کنید. کلید را در
+  Git، `liara.json`، Dockerfile، اسکرین‌شات یا ویدئوی دمو قرار ندهید. پس از دمو
+  نیز آن را rotate کنید.
+
+### خطا و Failure
+
+- همه پاسخ‌های خطا ساختار ثابت `message`، `code` و `request_id` دارند؛ خطای
+  validation ورودی کاربر یا stack trace را افشا نمی‌کند.
+- تماس embedding فقط برای خطاهای گذرای شبکه، timeout، 429 و 5xx با backoff
+  retry می‌شود؛ خطاهای دائمی 4xx بیهوده retry نمی‌شوند.
+- چت استریمی timeout سراسری دارد و قطع اتصال کاربر باعث توقف تولید پاسخ می‌شود.
+  خطای LLM، ازدحام، timeout و خطای داخلی پیام فارسی قابل‌فهم و کد ماشینی مجزا
+  دارند.
+
+### Health، Log و Metrics
+
+- `GET /health`: liveness سبک برای Docker و لیارا.
+- `GET /ready`: وضعیت SQLite، پیکربندی LLM و index؛ در خرابی با `503` پاسخ
+  می‌دهد و هیچ تماس پولی با مدل انجام نمی‌دهد.
+- `GET /metrics`: خروجی Prometheus شامل تعداد/وضعیت درخواست‌ها، latency
+  histogram HTTP و end-to-end عملیات LLM (از جمله کل استریم چت)، درخواست‌های
+  در حال اجرا، rate limitها، failureها و مصرف توکن.
+  اگر `METRICS_TOKEN` تنظیم شود باید هدر
+  `Authorization: Bearer <METRICS_TOKEN>` فرستاده شود.
+- هر پاسخ `X-Request-ID` دارد و همان شناسه داخل log JSON ثبت می‌شود. logها body،
+  متن سؤال، API key یا IP کاربر را ذخیره نمی‌کنند و برای ingestion مستقیم در
+  ابزارهای مانیتورینگ مناسب‌اند.
+
+برای alert اولیه این سه شرط کاربردی‌اند: افزایش نرخ statusهای `5xx`، افزایش
+`liara_failures_total`، و latency صدک ۹۵ بالاتر از timeout معمول سرویس.
 
 ---
 

@@ -11,8 +11,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from dataclasses import dataclass, field
+from math import ceil
+from threading import Lock
 
 from fastapi import Request
 
@@ -28,46 +31,80 @@ class RateLimiter:
         self.rate = per_minute / 60.0          # توکن بر ثانیه
         self.capacity = burst or per_minute
         self._buckets: dict[str, _Bucket] = {}
+        self._lock = Lock()
 
-    def check(self, key: str) -> tuple[bool, int]:
+    def check(self, key: str) -> tuple[bool, int, int]:
         """
-        (اجازه دارد؟، ثانیه تا تلاش بعدی)
+        (اجازه دارد؟، ثانیه تا تلاش بعدی، ظرفیت باقی‌مانده)
         """
-        now = time.monotonic()
-        b = self._buckets.get(key)
-        if b is None:
-            b = _Bucket(tokens=self.capacity)
-            self._buckets[key] = b
+        with self._lock:
+            now = time.monotonic()
+            b = self._buckets.get(key)
+            if b is None:
+                b = _Bucket(tokens=self.capacity)
+                self._buckets[key] = b
 
-        # پر شدن سطل به اندازه‌ی زمان گذشته
-        b.tokens = min(self.capacity, b.tokens + (now - b.last) * self.rate)
-        b.last = now
+            # پر شدن سطل به اندازه‌ی زمان گذشته
+            b.tokens = min(self.capacity, b.tokens + (now - b.last) * self.rate)
+            b.last = now
 
-        if b.tokens >= 1:
-            b.tokens -= 1
-            return True, 0
+            if b.tokens >= 1:
+                b.tokens -= 1
+                return True, 0, max(0, int(b.tokens))
 
-        return False, max(1, int((1 - b.tokens) / self.rate))
+            retry_after = max(1, ceil((1 - b.tokens) / self.rate))
+            return False, retry_after, 0
 
     def prune(self, max_keys: int = 10_000) -> None:
         """جلوگیری از رشد بی‌حد حافظه با ترافیک IPهای متنوع."""
-        if len(self._buckets) <= max_keys:
-            return
-        now = time.monotonic()
-        stale = [k for k, v in self._buckets.items() if now - v.last > 300]
-        for k in stale:
-            del self._buckets[k]
+        with self._lock:
+            if len(self._buckets) <= max_keys:
+                return
+            now = time.monotonic()
+            stale = [k for k, v in self._buckets.items() if now - v.last > 300]
+            for k in stale:
+                del self._buckets[k]
+
+            # در حمله‌ای با IPهای یکتا، حتی کلیدهای تازه هم نباید حافظه را
+            # بی‌حد رشد دهند. قدیمی‌ترین‌ها تا سقف حذف می‌شوند.
+            overflow = len(self._buckets) - max_keys
+            if overflow > 0:
+                oldest = sorted(self._buckets, key=lambda k: self._buckets[k].last)
+                for key in oldest[:overflow]:
+                    del self._buckets[key]
 
 
-def client_ip(request: Request) -> str:
+class CapacityLimiter:
+    """Bulkhead: خرابی/کندی LLM همه workerها را اشغال نمی‌کند."""
+
+    def __init__(self, capacity: int) -> None:
+        self._semaphore = asyncio.BoundedSemaphore(capacity)
+
+    async def acquire(self, timeout: float = 0.25) -> bool:
+        try:
+            await asyncio.wait_for(self._semaphore.acquire(), timeout=timeout)
+            return True
+        except TimeoutError:
+            return False
+
+    def release(self) -> None:
+        self._semaphore.release()
+
+
+def client_ip(request: Request, *, trust_proxy: bool = False) -> str:
     """
     IP واقعی پشت پروکسی لیارا.
 
-    ⚠️ X-Forwarded-For قابل جعل است. اینجا فقط برای سقف نرخ استفاده می‌شود
-    نه برای تصمیم امنیتی، پس قابل قبول است — ولی هرگز نباید مبنای احراز
-    هویت قرار بگیرد.
+    X-Forwarded-For فقط با تنظیم صریح TRUST_PROXY_HEADERS پذیرفته می‌شود؛
+    در حالت پیش‌فرض ورودی قابل جعل کاربر نادیده گرفته می‌شود.
     """
     fwd = request.headers.get("x-forwarded-for")
-    if fwd:
+    if trust_proxy and fwd:
         return fwd.split(",")[0].strip()
     return request.client.host if request.client else "unknown"
+
+
+# یک bulkhead مشترک برای تمام مسیرهایی که LLM مصرف می‌کنند.
+from app.settings import settings  # noqa: E402  (پس از تعریف کلاس‌ها)
+
+llm_capacity = CapacityLimiter(settings.max_concurrent_llm_requests)

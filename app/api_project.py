@@ -11,11 +11,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
+from openai import APIError
 from pydantic import BaseModel, Field
 
 from app.project import (
@@ -28,7 +30,8 @@ from app.project import (
     liara_json_for,
     services_for,
 )
-from app.security import client_ip
+from app.observability import metrics
+from app.security import llm_capacity
 from app.settings import settings
 
 log = logging.getLogger("app.project")
@@ -139,7 +142,7 @@ async def options():
 @router.post("/plan", response_model=PlanResponse,
              summary="ساخت نقشه استقرار از پروفایل پروژه")
 async def plan(req: PlanRequest, request: Request):
-    request_id = uuid.uuid4().hex[:12]
+    request_id = getattr(request.state, "request_id", uuid.uuid4().hex[:12])
 
     if settings.use_mock:
         return JSONResponse(status_code=503, content={
@@ -163,17 +166,40 @@ async def plan(req: PlanRequest, request: Request):
     from app.llm import LLMUnavailable
     from app.session import sessions
 
+    acquired = await llm_capacity.acquire()
+    if not acquired:
+        metrics.failure("llm_capacity")
+        return JSONResponse(status_code=503, content={
+            "code": "service_busy", "request_id": request_id,
+            "message": "سرویس موقتاً شلوغ است."})
+
     try:
-        result = await build_plan(profile, services)
+        async with asyncio.timeout(settings.request_timeout_seconds):
+            result = await build_plan(profile, services)
+    except TimeoutError:
+        metrics.failure("project_plan_timeout")
+        return JSONResponse(status_code=504, content={
+            "code": "timeout", "request_id": request_id,
+            "message": "ساخت نقشه بیش از حد طول کشید."})
     except LLMUnavailable:
+        metrics.failure("llm_unavailable")
+        return JSONResponse(status_code=503, content={
+            "code": "llm_unavailable", "request_id": request_id,
+            "message": "سرویس هوش مصنوعی در دسترس نیست."})
+    except APIError as exc:
+        metrics.failure("llm_provider")
+        log.error("llm provider error rid=%s type=%s", request_id, type(exc).__name__)
         return JSONResponse(status_code=503, content={
             "code": "llm_unavailable", "request_id": request_id,
             "message": "سرویس هوش مصنوعی در دسترس نیست."})
     except Exception:
+        metrics.failure("project_plan")
         log.exception("plan failed rid=%s", request_id)
         return JSONResponse(status_code=500, content={
             "code": "internal_error", "request_id": request_id,
             "message": "خطای داخلی."})
+    finally:
+        llm_capacity.release()
 
     # پروفایل در session می‌ماند تا سؤالات بعدی شخصی‌سازی شوند
     session = sessions.get(req.session_id, req.client_id)
@@ -185,6 +211,8 @@ async def plan(req: PlanRequest, request: Request):
     log.info("plan rid=%s platform=%s needs=%d services=%d tokens=%d",
              request_id, profile.platform, len(profile.needs),
              len(services), result["tokens"])
+    metrics.token_usage("project_plan", result["tokens"])
+    metrics.observe_operation("project_plan", result["latency_ms"] / 1000)
 
     return PlanResponse(
         request_id=request_id,

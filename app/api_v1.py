@@ -14,23 +14,22 @@ API برنامه‌نویسی — برای مصرف توسط ایجنت‌های
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
+from openai import APIError
 from pydantic import BaseModel, Field
 
-from app.security import RateLimiter, client_ip
+from app.observability import metrics
+from app.security import llm_capacity
 from app.settings import settings
 
 log = logging.getLogger("app.api")
 
 router = APIRouter(prefix="/api/v1", tags=["v1"])
-
-# سقف نرخ مخصوص این API. هر تماس یک تماس LLM پشتش دارد.
-limiter = RateLimiter(per_minute=settings.rate_limit_per_minute)
-
 
 # ---------------------------------------------------------------- مدل‌ها
 
@@ -109,18 +108,7 @@ class AskResponse(BaseModel):
                 "به‌همراه لینک منابع و متن خام برمی‌گرداند.",
 )
 async def ask(req: AskRequest, request: Request):
-    request_id = uuid.uuid4().hex[:12]
-
-    allowed, retry_after = limiter.check(client_ip(request))
-    if not allowed:
-        limiter.prune()
-        log.warning("rate limited ip=%s rid=%s", client_ip(request), request_id)
-        return JSONResponse(
-            status_code=429,
-            content={"code": "rate_limited", "request_id": request_id,
-                     "message": f"تعداد درخواست بیش از حد. {retry_after} ثانیه صبر کنید."},
-            headers={"Retry-After": str(retry_after)},
-        )
+    request_id = getattr(request.state, "request_id", uuid.uuid4().hex[:12])
 
     if settings.use_mock:
         return JSONResponse(
@@ -129,30 +117,59 @@ async def ask(req: AskRequest, request: Request):
                      "message": "سرور در حالت mock است. USE_MOCK=false را تنظیم کنید."},
         )
 
+    acquired = await llm_capacity.acquire()
+    if not acquired:
+        metrics.failure("llm_capacity")
+        return JSONResponse(
+            status_code=503,
+            content={"code": "service_busy", "request_id": request_id,
+                     "message": "سرویس موقتاً شلوغ است."},
+        )
+
     from app.agent import answer_once
     from app.llm import LLMUnavailable
 
     try:
-        result = await answer_once(
-            req.question,
-            session_id=req.session_id,
-            platform=req.platform,
-            k=req.max_sources,
+        async with asyncio.timeout(settings.request_timeout_seconds):
+            result = await answer_once(
+                req.question,
+                session_id=req.session_id,
+                platform=req.platform,
+                k=req.max_sources,
+            )
+    except TimeoutError:
+        metrics.failure("ask_timeout")
+        return JSONResponse(
+            status_code=504,
+            content={"code": "timeout", "request_id": request_id,
+                     "message": "پاسخ‌گویی بیش از حد طول کشید."},
         )
     except LLMUnavailable as exc:
+        metrics.failure("llm_unavailable")
         log.error("llm unavailable rid=%s: %s", request_id, exc)
         return JSONResponse(
             status_code=503,
             content={"code": "llm_unavailable", "request_id": request_id,
                      "message": "سرویس هوش مصنوعی در دسترس نیست."},
         )
+    except APIError as exc:
+        metrics.failure("llm_provider")
+        log.error("llm provider error rid=%s type=%s", request_id, type(exc).__name__)
+        return JSONResponse(
+            status_code=503,
+            content={"code": "llm_unavailable", "request_id": request_id,
+                     "message": "سرویس هوش مصنوعی در دسترس نیست."},
+        )
     except Exception:
+        metrics.failure("ask")
         log.exception("ask failed rid=%s", request_id)
         return JSONResponse(
             status_code=500,
             content={"code": "internal_error", "request_id": request_id,
                      "message": "خطای داخلی."},
         )
+    finally:
+        llm_capacity.release()
 
     # یک منبع به ازای هر صفحه؛ چند تکه از یک صفحه یک لینک است.
     sources: list[SourceOut] = []
@@ -167,10 +184,12 @@ async def ask(req: AskRequest, request: Request):
         ))
 
     log.info(
-        "ask rid=%s conf=%s hits=%d tokens=%d ms=%d q=%r",
+        "ask rid=%s conf=%s hits=%d tokens=%d ms=%d",
         request_id, result.confidence, len(result.hits),
-        result.tokens, result.latency_ms, result.query_used,
+        result.tokens, result.latency_ms,
     )
+    metrics.token_usage("ask", result.tokens)
+    metrics.observe_operation("ask", result.latency_ms / 1000)
 
     return AskResponse(
         request_id=request_id,

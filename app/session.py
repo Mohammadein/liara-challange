@@ -243,6 +243,14 @@ class SessionStore:
             row = conn.execute("SELECT * FROM sessions WHERE id = ?", (sid,)).fetchone()
         return self._row_to_session(row, [])
 
+    def healthcheck(self) -> bool:
+        """بررسی واقعی دسترسی SQLite برای readiness، بدون تغییر داده."""
+        try:
+            with self._lock, self._connect() as conn:
+                return conn.execute("SELECT 1").fetchone()[0] == 1
+        except Exception:
+            return False
+
     def get(
         self,
         session_id: str,
