@@ -250,20 +250,44 @@ def _flatten_map_expression(block: str) -> str:
     return "\n" + "\n".join(f"- {v}" for v in seen) + "\n"
 
 
+def _enclosing_brace(text: str, pos: int) -> tuple[int, int]:
+    """
+    بیرونی‌ترین { که موقعیت pos داخلش است.
+
+    ⚠️ اینجا اول rfind("{") زدم که غلط بود: نزدیک‌ترین { قبل از .map همان
+    آبجکت آخرِ داخل آرایه است، نه {[ بیرونی. نتیجه‌اش این شد که از فهرست
+    ۱۶تایی مدل‌ها فقط چند مورد آخر بیرون می‌آمد.
+
+    درستش این است که به عقب برویم تا براکتی که واقعاً pos را در بر بگیرد.
+    """
+    i = pos
+    while i >= 0:
+        i = text.rfind("{", 0, i)
+        if i == -1:
+            return -1, -1
+        end = _match_bracket(text, i, "{", "}")
+        if end > pos:
+            return i, end
+    return -1, -1
+
+
 def _remove_map_expressions(text: str) -> str:
     """گریدهای {[...].map(...)} را به فهرست ساده‌ی متنی تبدیل می‌کند."""
-    while True:
+    guard = 0
+    while guard < 50:
+        guard += 1
         m = re.search(r"\.map\s*\(", text)
         if not m:
             return text
-        # عقب‌گرد تا اولین { که این عبارت داخلش است
-        open_idx = text.rfind("{", 0, m.start())
-        if open_idx == -1:
+
+        start, end = _enclosing_brace(text, m.start())
+        if start == -1:
+            # براکت دربرگیرنده پیدا نشد؛ فقط خود .map را حذف کن تا حلقه
+            # بی‌پایان نشود
             return text[:m.start()] + text[m.end():]
-        end = _match_bracket(text, open_idx, "{", "}")
-        if end == -1:
-            return text[:open_idx]
-        text = text[:open_idx] + _flatten_map_expression(text[open_idx:end]) + text[end:]
+
+        text = text[:start] + _flatten_map_expression(text[start:end]) + text[end:]
+    return text
 
 
 def _expand_steps(text: str) -> str:
