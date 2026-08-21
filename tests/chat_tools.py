@@ -40,11 +40,13 @@ CASES = [
                "مستندات بگیرد و بپرسد.",
     },
     {
-        "name": "list_variants — گزینه‌ها باید واقعی باشند",
+        "name": "چند واریانت — باید اول بپرسد، نه اینکه همه را بریزد",
         "message": "چطور به object storage وصل بشم؟",
-        "expect": {"tools_any": ["list_variants"]},
-        "why": "مستندات برای زبان‌های مختلف نسخه جدا دارد. گزینه‌های "
-               "پیشنهادی باید از همان‌ها باشند.",
+        "expect": {"max_code_blocks": 1, "max_answer_chars": 900},
+        "why": "مستندات برای هر زبان نسخه جدا دارد. کاربر پایتون‌کار نباید "
+               "مجبور باشد از کنار نمونه‌کد Go و dotNET رد شود تا به سؤال "
+               "برسد. صدا زدن ابزار مهم نیست — مدل واریانت‌ها را از برچسب "
+               "تکه‌ها می‌بیند؛ مهم این است که اول بپرسد.",
     },
     {
         "name": "diagnose_error — خطای نصب پکیج",
@@ -183,6 +185,14 @@ def main() -> None:
         if "max_tokens" in exp:
             t = done.get("tokens_used", 0)
             checks.append((t <= exp["max_tokens"], f"توکن {t} <= {exp['max_tokens']}"))
+        if "max_code_blocks" in exp:
+            n = answer.count("```") // 2
+            checks.append((n <= exp["max_code_blocks"],
+                           f"بلوک کد {n} <= {exp['max_code_blocks']}"))
+        if "max_answer_chars" in exp:
+            n = len(answer)
+            checks.append((n <= exp["max_answer_chars"],
+                           f"طول پاسخ {n} <= {exp['max_answer_chars']}"))
 
         ok = all(c[0] for c in checks)
         passed += ok
