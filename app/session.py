@@ -73,12 +73,41 @@ class Session:
         if self._store:
             self._store.add_message(self, message)
 
-    def history(self) -> list[dict[str, str]]:
-        """OpenAI-compatible context without UI-only message metadata."""
-        return [
-            {"role": turn["role"], "content": turn["content"]}
-            for turn in self.turns[-MAX_CONTEXT_TURNS * 2:]
-        ]
+    def history(self, max_chars: int | None = None) -> list[dict[str, str]]:
+        """OpenAI context با سقف turn و کاراکتر؛ transcript کامل در DB می‌ماند."""
+        budget = max_chars if max_chars is not None else settings.max_history_chars
+        selected: list[dict[str, str]] = []
+        remaining = budget
+
+        def clip(text: str, limit: int) -> str:
+            if len(text) <= limit:
+                return text
+            marker = "\n…[بخش میانی حذف شد]…\n"
+            available = max(1, limit - len(marker))
+            head = max(1, int(available * 0.6))
+            tail = max(0, available - head)
+            return f"{text[:head]}{marker}{text[-tail:] if tail else ''}"
+
+        for turn in reversed(self.turns[-MAX_CONTEXT_TURNS * 2:]):
+            content = str(turn["content"])
+            if len(content) <= remaining:
+                selected.append({"role": turn["role"], "content": content})
+                remaining -= len(content)
+                continue
+
+            if remaining < 40:
+                break
+
+            # اگر تازه‌ترین پاسخ خیلی بلند بود همه بودجه را نمی‌بلعد؛ بخشی
+            # برای پیام کاربری که آن پاسخ را ساخته رزرو می‌شود.
+            limit = remaining
+            if not selected and turn["role"] == "assistant":
+                limit = max(100, int(remaining * 0.7))
+            clipped = clip(content, limit)
+            selected.append({"role": turn["role"], "content": clipped})
+            remaining -= len(clipped)
+
+        return list(reversed(selected))
 
     def transcript(self, limit: int = 4) -> str:
         return "\n".join(

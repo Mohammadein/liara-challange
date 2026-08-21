@@ -77,6 +77,7 @@ class ExcerptOut(BaseModel):
 class Usage(BaseModel):
     tokens: int = 0
     latency_ms: int = 0
+    cached: bool = False
 
 
 class AskResponse(BaseModel):
@@ -184,9 +185,9 @@ async def ask(req: AskRequest, request: Request):
         ))
 
     log.info(
-        "ask rid=%s conf=%s hits=%d tokens=%d ms=%d",
+        "ask rid=%s conf=%s hits=%d tokens=%d ms=%d cached=%s",
         request_id, result.confidence, len(result.hits),
-        result.tokens, result.latency_ms,
+        result.tokens, result.latency_ms, result.cached,
     )
     metrics.token_usage("ask", result.tokens)
     metrics.observe_operation("ask", result.latency_ms / 1000)
@@ -207,5 +208,8 @@ async def ask(req: AskRequest, request: Request):
         query_used=result.query_used,
         service=result.service,
         confidence=result.confidence,
-        usage=Usage(tokens=result.tokens, latency_ms=result.latency_ms),
+        usage=Usage(
+            tokens=result.tokens, latency_ms=result.latency_ms,
+            cached=result.cached,
+        ),
     )

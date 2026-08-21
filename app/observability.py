@@ -94,6 +94,7 @@ class Metrics:
         self.operation_duration: Counter[tuple[str, float]] = Counter()
         self.operation_duration_sum: Counter[str] = Counter()
         self.operations: Counter[str] = Counter()
+        self.cache_events: Counter[tuple[str, str]] = Counter()
 
     def start_request(self) -> None:
         with self._lock:
@@ -131,6 +132,11 @@ class Metrics:
             for upper in self._duration_buckets:
                 if elapsed_seconds <= upper:
                     self.operation_duration[(operation, upper)] += 1
+
+    def cache_event(self, cache: str, result: str) -> None:
+        """result یکی از hit/miss/bypass است؛ labelها عمداً محدودند."""
+        with self._lock:
+            self.cache_events[(cache, result)] += 1
 
     def render(self) -> str:
         """فرمت exposition استاندارد Prometheus."""
@@ -217,6 +223,15 @@ class Metrics:
                 lines.append(
                     f'liara_llm_operation_duration_seconds_sum{{operation="{operation}"}} '
                     f'{self.operation_duration_sum[operation]:.6f}'
+                )
+            lines += [
+                "# HELP liara_cache_events_total Cache hits, misses and bypasses.",
+                "# TYPE liara_cache_events_total counter",
+            ]
+            for (cache, result), value in sorted(self.cache_events.items()):
+                lines.append(
+                    f'liara_cache_events_total{{cache="{cache}",result="{result}"}} '
+                    f'{value}'
                 )
             return "\n".join(lines) + "\n"
 

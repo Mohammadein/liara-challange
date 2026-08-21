@@ -320,7 +320,12 @@ paths, AND you can list the options:
 Never set both a useful query and a clarify."""
 
 
-def build_context(hits) -> str:
+def build_context(
+    hits,
+    *,
+    max_chars: int | None = None,
+    max_excerpt_chars: int | None = None,
+) -> str:
     """
     Render retrieved chunks as the context block.
 
@@ -331,12 +336,35 @@ def build_context(hits) -> str:
     if not hits:
         return "(هیچ متن مرتبطی در مستندات پیدا نشد)"
 
+    from app.settings import settings
+
+    budget = max_chars if max_chars is not None else settings.max_context_chars
+    excerpt_budget = (
+        max_excerpt_chars
+        if max_excerpt_chars is not None
+        else settings.max_context_excerpt_chars
+    )
     parts = []
+    used = 0
     for i, h in enumerate(hits, start=1):
         header = f"[{i}] {h.page_title}"
         if h.section_title:
             header += f" › {h.section_title}"
         if h.variant:
             header += f"  (روش: {h.variant})"
-        parts.append(f"{header}\n{h.text}")
+        excerpt = h.text[:excerpt_budget]
+        if len(h.text) > len(excerpt):
+            excerpt += "\n…[ادامه این بخش برای کنترل هزینه حذف شد]"
+        piece = f"{header}\n{excerpt}"
+        separator_size = 7 if parts else 0
+        remaining = budget - used - separator_size
+        if remaining <= len(header) + 120:
+            break
+        if len(piece) > remaining:
+            marker = "\n…[سقف متن مستندات]"
+            piece = piece[:max(0, remaining - len(marker))].rstrip() + marker
+        parts.append(piece)
+        used += separator_size + len(piece)
+        if used >= budget:
+            break
     return "\n\n---\n\n".join(parts)

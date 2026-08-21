@@ -21,7 +21,9 @@ from openai import (
     RateLimitError,
 )
 
+from app.observability import metrics
 from app.settings import settings
+from app.text_norm import normalize
 
 log = logging.getLogger("app.llm")
 
@@ -88,8 +90,8 @@ def _retry(fn, what: str):
     raise LLMUnavailable(f"{what} ناموفق بود.") from last
 
 
-@lru_cache(maxsize=2048)
-def embed_query(text: str) -> tuple[float, ...]:
+@lru_cache(maxsize=settings.cache_max_entries)
+def _embed_query_cached(text: str) -> tuple[float, ...]:
     """
     امبدینگ سؤال کاربر.
 
@@ -103,11 +105,25 @@ def embed_query(text: str) -> tuple[float, ...]:
         resp = client().embeddings.create(
             model=settings.model_embedding, input=[text]
         )
+        if resp.usage:
+            metrics.token_usage("embedding", resp.usage.total_tokens)
         return resp.data[0].embedding
 
     vec = np.array(_retry(call, "امبدینگ سؤال"), dtype=np.float32)
     vec /= max(float(np.linalg.norm(vec)), 1e-9)
     return tuple(vec.tolist())
+
+
+def embed_query(text: str) -> tuple[float, ...]:
+    """ورودی نرمال‌شده باعث hit برای شکل‌های معادل فارسی نیز می‌شود."""
+    normalized = normalize(text).strip()
+    before = _embed_query_cached.cache_info()
+    result = _embed_query_cached(normalized)
+    after = _embed_query_cached.cache_info()
+    metrics.cache_event(
+        "embedding", "hit" if after.hits > before.hits else "miss"
+    )
+    return result
 
 
 def embed_query_np(text: str) -> np.ndarray:

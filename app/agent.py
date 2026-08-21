@@ -29,6 +29,7 @@ from dataclasses import dataclass
 from openai import APIError
 
 from app import flows, suggest
+from app.cache import TTLCache, cache_key
 from app.contracts import (
     DoneEvent,
     ErrorEvent,
@@ -64,8 +65,13 @@ from app.text_norm import normalize
 
 log = logging.getLogger("app.agent")
 
-# سقف دورهای ابزار. هر دور یک تماس LLM است.
-MAX_TOOL_ROUNDS = 2
+# Cacheها process-local و محدودند؛ در scale افقی backend اشتراکی لازم است.
+_rewrite_cache = TTLCache(settings.cache_max_entries, settings.cache_ttl_seconds)
+_stateless_answer_cache = TTLCache(
+    settings.cache_max_entries, settings.cache_ttl_seconds
+)
+_chat_answer_cache = TTLCache(settings.cache_max_entries, settings.cache_ttl_seconds)
+_plan_cache = TTLCache(settings.cache_max_entries, settings.cache_ttl_seconds)
 
 _retriever: Retriever | None = None
 
@@ -446,6 +452,15 @@ async def rewrite(question: str, session: Session) -> dict:
 
     history = session.transcript()
     user = f"مکالمه تا اینجا:\n{history}\n\nسؤال جدید: {question}" if history else question
+    rewrite_key = cache_key(
+        "rewrite", settings.model_fast, REWRITE_SYSTEM, user,
+    )
+    cache_hit, cached_plan = _rewrite_cache.get(rewrite_key)
+    metrics.cache_event("rewrite", "hit" if cache_hit else "miss")
+    if cache_hit:
+        cached_plan["tokens"] = 0
+        cached_plan["cached"] = True
+        return cached_plan
 
     try:
         resp = await aclient().chat.completions.create(
@@ -456,9 +471,9 @@ async def rewrite(question: str, session: Session) -> dict:
             ],
             response_format={"type": "json_object"},
             temperature=0,
-            # ۳۰۰ نه ۲۰۰: حالا `options` هم در همین JSON می‌آید و بریده شدن
-            # خروجی یعنی JSON ناقص و افتادن به مسیر پشتیبان.
-            max_tokens=300,
+            # خروجی JSON سقف مستقل دارد؛ برای query و حداکثر پنج option کافی
+            # است و اجازه نمی‌دهد rewrite ارزان به پاسخ بلند تبدیل شود.
+            max_tokens=settings.rewrite_max_output_tokens,
         )
         data = json.loads(resp.choices[0].message.content or "{}")
         usage = resp.usage.total_tokens if resp.usage else 0
@@ -477,13 +492,15 @@ async def rewrite(question: str, session: Session) -> dict:
         log.info("dropped option-less clarification: %r", clarify[:80])
         clarify, options = None, []
 
-    return {
+    result = {
         "query": (data.get("query") or question).strip(),
         "service": data.get("service") or None,
         "clarify": clarify,
         "options": options,
         "tokens": usage,
     }
+    _rewrite_cache.set(rewrite_key, result)
+    return result
 
 
 # ------------------------------------------------------------ منابع
@@ -543,6 +560,7 @@ class AnswerResult:
     confidence: str
     tokens: int
     latency_ms: int
+    cached: bool = False
 
 
 async def answer_once(
@@ -560,6 +578,21 @@ async def answer_once(
     فقط یک پاراگراف روان. هر دو برگردانده می‌شوند.
     """
     started = time.perf_counter()
+    response_key: str | None = None
+    if not session_id:
+        response_key = cache_key(
+            "stateless-answer", question, platform, k or settings.top_k,
+            settings.model_answer, settings.model_fast,
+            settings.max_context_chars, settings.answer_max_output_tokens,
+        )
+        cache_hit, cached_result = _stateless_answer_cache.get(response_key)
+        metrics.cache_event("stateless_answer", "hit" if cache_hit else "miss")
+        if cache_hit:
+            cached_result.tokens = 0
+            cached_result.cached = True
+            cached_result.latency_ms = int((time.perf_counter() - started) * 1000)
+            return cached_result
+
     session = sessions.get(session_id) if session_id else Session(id="_stateless")
     tokens = 0
 
@@ -573,12 +606,15 @@ async def answer_once(
                 session.service = plan["service"]
             session.add("user", question)
             session.add("assistant", plan["clarify"])
-        return AnswerResult(
+        result = AnswerResult(
             answer="", hits=[], query_used=plan["query"],
             service=plan["service"], clarification=plan["clarify"],
             confidence="none", tokens=tokens,
             latency_ms=int((time.perf_counter() - started) * 1000),
         )
+        if response_key:
+            _stateless_answer_cache.set(response_key, result)
+        return result
 
     # راهنمای پلتفرم از سمت فراخواننده به کوئری اضافه می‌شود تا نسخه‌ی
     # درست صفحه (django/flask/nodejs) بالا بیاید. اگر فراخواننده چیزی نداد،
@@ -610,7 +646,7 @@ async def answer_once(
                 f"# متن مستندات\n\n{build_context(hits)}\n\n# سؤال کاربر\n\n{question}"},
         ],
         temperature=0.2,
-        max_tokens=900,
+        max_tokens=settings.answer_max_output_tokens,
     )
     answer = resp.choices[0].message.content or ""
     tokens += resp.usage.total_tokens if resp.usage else 0
@@ -622,11 +658,14 @@ async def answer_once(
             session.service = service
         session.save()
 
-    return AnswerResult(
+    result = AnswerResult(
         answer=answer, hits=hits, query_used=query, service=service,
         clarification=None, confidence=confidence_of(hits), tokens=tokens,
         latency_ms=int((time.perf_counter() - started) * 1000),
     )
+    if response_key:
+        _stateless_answer_cache.set(response_key, result)
+    return result
 
 
 async def build_plan(profile, services: list[dict]) -> dict:
@@ -638,6 +677,18 @@ async def build_plan(profile, services: list[dict]) -> dict:
     متفاوت‌اند و یک کوئری ترکیبی برای هیچ‌کدام تکه‌ی خوبی نمی‌آورد.
     """
     started = time.perf_counter()
+    plan_key = cache_key(
+        "project-plan", profile.as_context(), services, settings.model_answer,
+        settings.max_plan_context_chars, settings.plan_max_output_tokens,
+    )
+    cache_hit, cached_plan = _plan_cache.get(plan_key)
+    metrics.cache_event("project_plan", "hit" if cache_hit else "miss")
+    if cache_hit:
+        cached_plan["tokens"] = 0
+        cached_plan["cached"] = True
+        cached_plan["latency_ms"] = int((time.perf_counter() - started) * 1000)
+        return cached_plan
+
     retriever = get_retriever()
 
     # بازیابی هدفمند به ازای هر سرویس.
@@ -653,8 +704,17 @@ async def build_plan(profile, services: list[dict]) -> dict:
     if profile.platform:
         queries.append(f"استقرار برنامه {profile.platform}")
 
-    for q in queries:
-        for h in retriever.search(q, k=per_service, variant=profile.variant_hint):
+    groups = [
+        retriever.search(q, k=per_service, variant=profile.variant_hint)
+        for q in queries
+    ]
+    # round-robin: پیش از نتیجه دوم یک سرویس، نتیجه اول همه سرویس‌ها می‌آید.
+    # بنابراین سقف context باعث حذف کامل سرویس‌های انتهای فرم نمی‌شود.
+    for rank in range(per_service):
+        for group in groups:
+            if rank >= len(group):
+                continue
+            h = group[rank]
             if h.id not in seen:
                 seen.add(h.id)
                 hits.append(h)
@@ -667,7 +727,7 @@ async def build_plan(profile, services: list[dict]) -> dict:
     user_msg = (
         f"# پروفایل پروژه\n{profile.as_context()}\n\n"
         f"# سرویس‌های لازم (قطعی، تغییرشان نده)\n{service_list}\n\n"
-        f"# متن مستندات\n{build_context(hits)}"
+        f"# متن مستندات\n{build_context(hits, max_chars=settings.max_plan_context_chars)}"
     )
 
     resp = await aclient().chat.completions.create(
@@ -677,15 +737,18 @@ async def build_plan(profile, services: list[dict]) -> dict:
             {"role": "user", "content": user_msg},
         ],
         temperature=0.3,
-        max_tokens=1600,
+        max_tokens=settings.plan_max_output_tokens,
     )
 
-    return {
+    result = {
         "plan": resp.choices[0].message.content or "",
         "sources": [s.model_dump() for s in _sources(hits)],
         "tokens": resp.usage.total_tokens if resp.usage else 0,
         "latency_ms": int((time.perf_counter() - started) * 1000),
+        "cached": False,
     }
+    _plan_cache.set(plan_key, result)
+    return result
 
 
 def _tool_detail(name: str, raw_result: str) -> str:
@@ -951,7 +1014,7 @@ async def flow_stream(
             {"role": "user", "content": user},
         ],
         temperature=0.2,
-        max_tokens=900,
+        max_tokens=settings.answer_max_output_tokens,
         stream=True,
         stream_options={"include_usage": True},
     )
@@ -1138,77 +1201,102 @@ async def chat_stream(
         box = ToolBox(get_retriever(), k=settings.top_k)
         box.collected = list(hits)
         answer = ""
+        answer_key = cache_key(
+            "chat-answer", settings.model_answer, messages,
+            settings.answer_max_output_tokens, TOOL_SPECS,
+        )
+        answer_cached, cached_answer = _chat_answer_cache.get(answer_key)
+        metrics.cache_event("chat_answer", "hit" if answer_cached else "miss")
 
         # حلقه‌ی ابزار با سقف. هر دور یک تماس LLM است — بدون سقف، مدل
         # می‌تواند بی‌پایان جستجو کند. در دور آخر ابزارها برداشته می‌شوند
         # تا مدل مجبور شود پاسخ بدهد، نه اینکه باز هم ابزار بخواهد.
-        for round_no in range(MAX_TOOL_ROUNDS + 1):
-            last_round = round_no == MAX_TOOL_ROUNDS
-            stream = await aclient().chat.completions.create(
-                model=settings.model_answer,
-                messages=messages,
-                temperature=0.2,
-                max_tokens=900,
-                stream=True,
-                stream_options={"include_usage": True},
-                **({} if last_round else {"tools": TOOL_SPECS, "tool_choice": "auto"}),
-            )
+        if answer_cached:
+            answer = str(cached_answer)
+            # replay در چند تکه تا UI همان رفتار استریم را حفظ کند.
+            for offset in range(0, len(answer), 180):
+                yield sse("token", TokenEvent(t=answer[offset:offset + 180]))
+        else:
+            used_tools = False
+            for round_no in range(settings.max_tool_rounds + 1):
+                last_round = round_no == settings.max_tool_rounds
+                stream = await aclient().chat.completions.create(
+                    model=settings.model_answer,
+                    messages=messages,
+                    temperature=0.2,
+                    max_tokens=settings.answer_max_output_tokens,
+                    stream=True,
+                    stream_options={"include_usage": True},
+                    **({} if last_round else {
+                        "tools": TOOL_SPECS, "tool_choice": "auto"
+                    }),
+                )
 
-            calls: dict[int, dict] = {}
-            async for part in stream:
-                if part.usage:
-                    tokens_used += part.usage.total_tokens
-                if not part.choices:
-                    continue
-                delta = part.choices[0].delta
+                calls: dict[int, dict] = {}
+                async for part in stream:
+                    if part.usage:
+                        tokens_used += part.usage.total_tokens
+                    if not part.choices:
+                        continue
+                    delta = part.choices[0].delta
 
-                if delta.content:
-                    answer += delta.content
-                    yield sse("token", TokenEvent(t=delta.content))
+                    if delta.content:
+                        answer += delta.content
+                        yield sse("token", TokenEvent(t=delta.content))
 
-                # فراخوانی ابزار تکه‌تکه می‌آید و باید سرهم شود
-                for tc in (delta.tool_calls or []):
-                    slot = calls.setdefault(tc.index, {"id": "", "name": "", "args": ""})
-                    if tc.id:
-                        slot["id"] = tc.id
-                    if tc.function and tc.function.name:
-                        slot["name"] = tc.function.name
-                    if tc.function and tc.function.arguments:
-                        slot["args"] += tc.function.arguments
+                    # فراخوانی ابزار تکه‌تکه می‌آید و باید سرهم شود
+                    for tc in (delta.tool_calls or []):
+                        slot = calls.setdefault(
+                            tc.index, {"id": "", "name": "", "args": ""}
+                        )
+                        if tc.id:
+                            slot["id"] = tc.id
+                        if tc.function and tc.function.name:
+                            slot["name"] = tc.function.name
+                        if tc.function and tc.function.arguments:
+                            slot["args"] += tc.function.arguments
 
-            if not calls:
-                break
+                if not calls:
+                    break
 
-            messages.append({
-                "role": "assistant",
-                "content": answer or None,
-                "tool_calls": [
-                    {"id": c["id"], "type": "function",
-                     "function": {"name": c["name"], "arguments": c["args"] or "{}"}}
-                    for c in calls.values()
-                ],
-            })
-
-            for c in calls.values():
-                try:
-                    args = json.loads(c["args"] or "{}")
-                except json.JSONDecodeError:
-                    args = {}
-
-                detail = args.get("topic") or args.get("variant") or ""
-                yield sse("tool", ToolEvent(name=c["name"], status="running",
-                                            detail=detail))
-                result = await box.run(c["name"], args)
-                yield sse("tool", ToolEvent(
-                    name=c["name"], status="done",
-                    detail=_tool_detail(c["name"], result),
-                ))
-
+                used_tools = True
                 messages.append({
-                    "role": "tool",
-                    "tool_call_id": c["id"],
-                    "content": result,
+                    "role": "assistant",
+                    "content": answer or None,
+                    "tool_calls": [
+                        {"id": c["id"], "type": "function",
+                         "function": {"name": c["name"],
+                                      "arguments": c["args"] or "{}"}}
+                        for c in calls.values()
+                    ],
                 })
+
+                for c in calls.values():
+                    try:
+                        args = json.loads(c["args"] or "{}")
+                    except json.JSONDecodeError:
+                        args = {}
+
+                    detail = args.get("topic") or args.get("variant") or ""
+                    yield sse("tool", ToolEvent(
+                        name=c["name"], status="running", detail=detail
+                    ))
+                    result = await box.run(c["name"], args)
+                    tokens_used += box.take_tokens()
+                    yield sse("tool", ToolEvent(
+                        name=c["name"], status="done",
+                        detail=_tool_detail(c["name"], result),
+                    ))
+
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": c["id"],
+                        "content": result,
+                    })
+
+            # پاسخ‌های tool-dependent بدون نتیجه ابزار قابل replay نیستند.
+            if answer and not used_tools:
+                _chat_answer_cache.set(answer_key, answer)
 
         # --- ۵. منابع ---
         stored_sources: list[Source] = []
@@ -1241,7 +1329,7 @@ async def chat_stream(
         session.save()
 
         yield sse("done", DoneEvent(
-            tokens_used=tokens_used, cached=False,
+            tokens_used=tokens_used, cached=answer_cached,
             latency_ms=int((time.perf_counter() - started) * 1000),
         ))
 

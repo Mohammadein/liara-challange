@@ -208,9 +208,9 @@ async def plan(req: PlanRequest, request: Request):
         session.variant = profile.variant_hint
     session.save()
 
-    log.info("plan rid=%s platform=%s needs=%d services=%d tokens=%d",
+    log.info("plan rid=%s platform=%s needs=%d services=%d tokens=%d cached=%s",
              request_id, profile.platform, len(profile.needs),
-             len(services), result["tokens"])
+             len(services), result["tokens"], result.get("cached", False))
     metrics.token_usage("project_plan", result["tokens"])
     metrics.observe_operation("project_plan", result["latency_ms"] / 1000)
 
@@ -220,5 +220,8 @@ async def plan(req: PlanRequest, request: Request):
         services=[ServiceOut(**s) for s in services],
         liara_json=liara_json_for(profile),
         sources=result["sources"],
-        usage={"tokens": result["tokens"], "latency_ms": result["latency_ms"]},
+        usage={
+            "tokens": result["tokens"], "latency_ms": result["latency_ms"],
+            "cached": result.get("cached", False),
+        },
     )

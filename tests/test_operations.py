@@ -135,6 +135,7 @@ class OperationsApiTests(unittest.TestCase):
         self.assertIn("liara_http_requests_total", allowed.text)
         self.assertIn("liara_failures_total", allowed.text)
         self.assertIn("liara_llm_tokens_total", allowed.text)
+        self.assertIn("liara_cache_events_total", allowed.text)
 
 
 if __name__ == "__main__":

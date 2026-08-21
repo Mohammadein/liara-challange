@@ -24,9 +24,11 @@ from __future__ import annotations
 import json
 import logging
 
+from app.cache import TTLCache, cache_key
 from app.contracts import Suggestion
 from app.flows import Flow, ResolvedStep, start_prompt, suggestible_flow
 from app.prompts import SUGGEST_SYSTEM
+from app.observability import metrics
 from app.settings import settings
 
 log = logging.getLogger("app.suggest")
@@ -36,6 +38,7 @@ MAX_SUGGESTIONS = 3
 # قدم بعدی روی آن‌ها بی‌معنی است و فقط توکن می‌سوزاند.
 MIN_ANSWER_CHARS = 120
 ANSWER_BUDGET = 700
+_suggest_cache = TTLCache(settings.cache_max_entries, settings.cache_ttl_seconds)
 
 
 def _clean(items: list[dict]) -> list[Suggestion]:
@@ -147,6 +150,18 @@ async def next_steps(
     if len(answer.strip()) < MIN_ANSWER_CHARS:
         return chips, 0
 
+    deterministic = _from_hits(hits)
+    tail = answer[-600:]
+    asks_material_choice = "؟" in tail and any(
+        cue in tail for cue in ("کدام", "کدوم", "با کدام", "انتخاب کنید")
+    )
+    # در پاسخ عادی، عنوان دو منبع مرتبط پیشنهاد کافی و grounded می‌دهد.
+    # مدل کوچک فقط وقتی ارزش دارد که باید گزینه‌های یک سؤال را استخراج کند
+    # یا منابع پیشنهاد قابل‌استفاده‌ای نساخته‌اند.
+    if deterministic and not asks_material_choice:
+        metrics.cache_event("suggestion_llm", "bypass")
+        return (chips + deterministic)[:MAX_SUGGESTIONS + len(chips)], 0
+
     pages = []
     seen: set[str] = set()
     for hit in hits[:6]:
@@ -160,6 +175,15 @@ async def next_steps(
         f"پاسخی که داده شد:\n{answer[:ANSWER_BUDGET]}\n\n"
         f"صفحات مستنداتی که استفاده شد:\n" + ("\n".join(pages) or "-")
     )
+    suggestion_key = cache_key(
+        "suggestions", settings.model_fast, SUGGEST_SYSTEM, user,
+        settings.suggest_max_output_tokens,
+    )
+    cache_hit, cached_items = _suggest_cache.get(suggestion_key)
+    metrics.cache_event("suggestions", "hit" if cache_hit else "miss")
+    if cache_hit:
+        merged = chips + cached_items
+        return merged[:MAX_SUGGESTIONS + len(chips)], 0
 
     try:
         from app.llm import aclient
@@ -172,18 +196,20 @@ async def next_steps(
             ],
             response_format={"type": "json_object"},
             temperature=0.3,
-            max_tokens=220,
+            max_tokens=settings.suggest_max_output_tokens,
         )
         data = json.loads(resp.choices[0].message.content or "{}")
         tokens = resp.usage.total_tokens if resp.usage else 0
         items = _clean(data.get("items") or [])
+        if items:
+            _suggest_cache.set(suggestion_key, items)
     except Exception as exc:
         log.warning("suggestions failed (%s), falling back to hits",
                     type(exc).__name__)
-        items, tokens = _from_hits(hits), 0
+        items, tokens = deterministic, 0
 
     if not items:
-        items = _from_hits(hits)
+        items = deterministic
 
     merged = chips + items
     return merged[:MAX_SUGGESTIONS + len(chips)], tokens

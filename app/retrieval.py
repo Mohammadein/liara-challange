@@ -22,7 +22,7 @@ from pathlib import Path
 import numpy as np
 
 from app.settings import settings
-from app.text_norm import tokenize
+from app.text_norm import normalize, tokenize
 
 log = logging.getLogger("app.retrieval")
 
@@ -177,8 +177,16 @@ class Retriever:
         # liara-json-mirror در صفحات deploy-app تطابق پیدا کرد — سؤالی که
         # قبل از بازنویسی درست کار می‌کرد. جستجوی هر دو، بازنویسی را از
         # «جایگزینی» به «غنی‌سازی» تبدیل می‌کند.
-        queries = [query] if isinstance(query, str) else [q for q in query if q]
-        queries = list(dict.fromkeys(queries)) or [""]
+        raw_queries = [query] if isinstance(query, str) else [q for q in query if q]
+        queries: list[str] = []
+        seen_queries: set[str] = set()
+        for candidate in raw_queries:
+            key = normalize(candidate).strip()
+            if not key or key in seen_queries:
+                continue
+            seen_queries.add(key)
+            queries.append(candidate)
+        queries = queries or [""]
         allowed = (
             [i for i, chunk in enumerate(self.chunks)
              if url_prefix in chunk.get("url", "")]

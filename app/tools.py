@@ -21,11 +21,15 @@ import json
 import logging
 import re
 
+from app.cache import TTLCache, cache_key
+from app.observability import metrics
 from app.retrieval import Hit, Retriever
+from app.settings import settings
 
 log = logging.getLogger("app.tools")
 
 MAX_EXCERPT_CHARS = 700
+_symptom_cache = TTLCache(settings.cache_max_entries, settings.cache_ttl_seconds)
 
 TOOL_LABELS = {
     "list_variants": "بررسی روش‌های موجود",
@@ -156,19 +160,26 @@ def error_signature(log: str) -> str:
     return re.sub(r"\s+", " ", sig).strip()[:300]
 
 
-async def _symptom_query(text: str) -> str:
+async def _symptom_query(text: str) -> tuple[str, int]:
     """
     خطای انگلیسی → توصیف فارسی همان مشکل، به زبان مستندات.
 
-    یک تماس ارزان با مدل کوچک. اگر شکست بخورد، رشته‌ی خالی برمی‌گردد و
-    جستجو با امضای خام ادامه می‌یابد — ترجمه‌ی ناموفق نباید ابزار را بکشد.
+    یک تماس ارزان با مدل کوچک؛ خروجی همراه usage برمی‌گردد تا هزینه پنهان
+    نماند. اگر شکست بخورد، رشته‌ی خالی و صفر توکن برمی‌گردد و جستجو با
+    امضای خام ادامه می‌یابد — ترجمه‌ی ناموفق نباید ابزار را بکشد.
     """
     if not text.strip():
-        return ""
+        return "", 0
+    key = cache_key(
+        "symptom", settings.model_fast, text[:600], settings.symptom_max_output_tokens,
+    )
+    cache_hit, cached = _symptom_cache.get(key)
+    metrics.cache_event("symptom", "hit" if cache_hit else "miss")
+    if cache_hit:
+        return str(cached), 0
     try:
         from app.llm import aclient
         from app.prompts import SYMPTOM_SYSTEM
-        from app.settings import settings
 
         resp = await aclient().chat.completions.create(
             model=settings.model_fast,
@@ -177,12 +188,15 @@ async def _symptom_query(text: str) -> str:
                 {"role": "user", "content": text[:600]},
             ],
             temperature=0,
-            max_tokens=60,
+            max_tokens=settings.symptom_max_output_tokens,
         )
-        return (resp.choices[0].message.content or "").strip().strip('"')
+        value = (resp.choices[0].message.content or "").strip().strip('"')
+        _symptom_cache.set(key, value)
+        tokens = resp.usage.total_tokens if resp.usage else 0
+        return value, tokens
     except Exception as exc:
         log.warning("symptom translation failed: %s", type(exc).__name__)
-        return ""
+        return "", 0
 
 
 # ------------------------------------------------------------ جعبه ابزار
@@ -199,6 +213,11 @@ class ToolBox:
         self.r = retriever
         self.k = k
         self.collected: list[Hit] = []
+        self.tokens_used = 0
+
+    def take_tokens(self) -> int:
+        used, self.tokens_used = self.tokens_used, 0
+        return used
 
     def _collect(self, hits: list[Hit]) -> None:
         seen = {h.id for h in self.collected}
@@ -248,7 +267,8 @@ class ToolBox:
 
     async def diagnose_error(self, log: str, platform: str | None = None) -> dict:
         sig = error_signature(log)
-        symptom = await _symptom_query(sig or log[:300])
+        symptom, tokens = await _symptom_query(sig or log[:300])
+        self.tokens_used += tokens
 
         # سه کوئری با هم: امضای خطا، ترجمه‌ی فارسی علامت، و لاگ خام.
         #

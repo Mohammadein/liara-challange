@@ -35,6 +35,25 @@ class Settings(BaseSettings):
     # پاسخ در مقابل ۲۵ امتیاز هزینه، معامله‌ی درستی است.
     top_k: int = 8
 
+    # --- کنترل هزینه و اندازه prompt ---
+    # تقریب کاراکتری عمداً به tokenizer یک provider خاص وابسته نیست.
+    max_history_chars: int = Field(default=6000, ge=500, le=50_000)
+    max_context_chars: int = Field(default=14_000, ge=2000, le=100_000)
+    max_plan_context_chars: int = Field(default=20_000, ge=3000, le=150_000)
+    max_context_excerpt_chars: int = Field(default=2200, ge=300, le=10_000)
+
+    rewrite_max_output_tokens: int = Field(default=220, ge=80, le=500)
+    answer_max_output_tokens: int = Field(default=750, ge=200, le=2000)
+    plan_max_output_tokens: int = Field(default=1200, ge=400, le=3000)
+    suggest_max_output_tokens: int = Field(default=160, ge=60, le=400)
+    symptom_max_output_tokens: int = Field(default=48, ge=20, le=150)
+    # یک دور ابزار + یک دور پاسخ نهایی برای ابزارهای فعلی کافی است.
+    max_tool_rounds: int = Field(default=1, ge=0, le=3)
+
+    # Cache فقط در حافظه همان process است؛ داده خام کاربر در key ذخیره نمی‌شود.
+    cache_ttl_seconds: int = Field(default=900, ge=0, le=86_400)
+    cache_max_entries: int = Field(default=512, ge=16, le=50_000)
+
     # --- امنیت ---
     max_message_chars: int = Field(default=2000, ge=100, le=20_000)
     max_request_body_bytes: int = Field(default=65_536, ge=1024, le=1_048_576)
