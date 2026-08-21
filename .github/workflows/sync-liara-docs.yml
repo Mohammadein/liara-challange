@@ -26,7 +26,7 @@ jobs:
 
     steps:
       - name: Checkout application
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Fetch latest Liara documentation
         run: >-
@@ -40,22 +40,23 @@ jobs:
 
       - name: Check whether this documentation was deployed
         id: deployed
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .sync-state
           key: deployed-docs-${{ hashFiles('docs/src/pages/**/*.mdx') }}
 
       - name: Set up Python
         if: steps.deployed.outputs.cache-hit != 'true' || inputs.force == true
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: requirements.txt
 
       - name: Restore embedding cache
+        id: embedding-cache
         if: steps.deployed.outputs.cache-hit != 'true' || inputs.force == true
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v6
         with:
           path: .cache
           key: embeddings-v1-${{ hashFiles('docs/src/pages/**/*.mdx') }}
@@ -102,9 +103,20 @@ jobs:
           print(f"Validated {len(chunks)} documentation chunks")
           PY
 
+      # Persist embeddings before deployment so a deployment failure does not
+      # cause the paid embedding work to be repeated on the next run.
+      - name: Save embedding cache
+        if: >-
+          (steps.deployed.outputs.cache-hit != 'true' || inputs.force == true) &&
+          steps.embedding-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: .cache
+          key: embeddings-v1-${{ hashFiles('docs/src/pages/**/*.mdx') }}
+
       - name: Set up Node.js
         if: steps.deployed.outputs.cache-hit != 'true' || inputs.force == true
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "22"
 
@@ -117,11 +129,13 @@ jobs:
         env:
           LIARA_API_TOKEN: ${{ secrets.LIARA_API_TOKEN }}
           LIARA_APP_NAME: ${{ vars.LIARA_APP_NAME || 'liara-docs-assistant' }}
+          LIARA_TEAM_ID: "6a868936fbcb9407788ee7a7"
         shell: bash
         run: |
           liara deploy \
             --api-token "$LIARA_API_TOKEN" \
             --app "$LIARA_APP_NAME" \
+            --team-id "$LIARA_TEAM_ID" \
             --platform docker \
             --port 8000 \
             --no-app-logs \
