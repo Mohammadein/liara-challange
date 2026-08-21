@@ -222,13 +222,36 @@ def _extract_code(text: str) -> tuple[str, list[str]]:
     return text, blocks
 
 
-def _remove_map_expressions(text: str) -> str:
-    """
-    حذف گریدهای ناوبری: {[{...}, {...}].map(item => <Card .../>)}
+# کلیدهایی که در آرایه‌های .map محتوا حمل می‌کنند (نه چیدمان)
+_CONTENT_KEYS = re.compile(
+    r"\b(?:platform|title|text|label|name|question|heading)\s*:\s*['\"]([^'\"]+)['\"]"
+)
 
-    اینها لیست «همچنین بخوانید» هستند، نه محتوا. اگر بمانند، بعد از حذف تگ‌ها
-    زباله‌ای مثل item.title در متن باقی می‌ماند.
+
+def _flatten_map_expression(block: str) -> str:
     """
+    داده‌ی معنادار را از یک گرید {[...].map(...)} بیرون می‌کشد.
+
+    ⚠️ اول این بلوک‌ها را کامل حذف می‌کردم با این استدلال که «لیست همچنین
+    بخوانید» هستند. غلط بود: فهرست کامل ۱۶ ارائه‌دهنده‌ی هوش مصنوعی لیارا
+    داخل همین ساختار است. نتیجه‌اش این شد که ربات OpenAI/GPT را جا انداخت
+    و بعد در پاسخ به «چت جی‌پی‌تی داره؟» گفت در مستندات نیست.
+
+    حالا مقادیر متنی نگه داشته می‌شوند و فقط قالب JSX دور ریخته می‌شود.
+    """
+    values = _CONTENT_KEYS.findall(block)
+    if not values:
+        return ""
+    # یکتا با حفظ ترتیب
+    seen: list[str] = []
+    for v in values:
+        if v not in seen:
+            seen.append(v)
+    return "\n" + "\n".join(f"- {v}" for v in seen) + "\n"
+
+
+def _remove_map_expressions(text: str) -> str:
+    """گریدهای {[...].map(...)} را به فهرست ساده‌ی متنی تبدیل می‌کند."""
     while True:
         m = re.search(r"\.map\s*\(", text)
         if not m:
@@ -240,7 +263,7 @@ def _remove_map_expressions(text: str) -> str:
         end = _match_bracket(text, open_idx, "{", "}")
         if end == -1:
             return text[:open_idx]
-        text = text[:open_idx] + text[end:]
+        text = text[:open_idx] + _flatten_map_expression(text[open_idx:end]) + text[end:]
 
 
 def _expand_steps(text: str) -> str:
