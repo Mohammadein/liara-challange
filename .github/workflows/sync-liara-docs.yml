@@ -1,0 +1,136 @@
+name: Sync Liara docs and deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Deploy even if the documentation has not changed
+        required: false
+        default: false
+        type: boolean
+  schedule:
+    # Twice an hour, away from the busy start-of-hour window.
+    - cron: "17,47 * * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: liara-docs-production
+  cancel-in-progress: false
+
+jobs:
+  sync-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout application
+        uses: actions/checkout@v4
+
+      - name: Fetch latest Liara documentation
+        run: >-
+          git clone --depth 1 --branch master --single-branch
+          https://github.com/liara-cloud/docs.git docs
+
+      - name: Read documentation revision
+        id: docs
+        shell: bash
+        run: echo "sha=$(git -C docs rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Check whether this documentation was deployed
+        id: deployed
+        uses: actions/cache@v4
+        with:
+          path: .sync-state
+          key: deployed-docs-${{ hashFiles('docs/src/pages/**/*.mdx') }}
+
+      - name: Set up Python
+        if: steps.deployed.outputs.cache-hit != 'true' || inputs.force == true
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Restore embedding cache
+        if: steps.deployed.outputs.cache-hit != 'true' || inputs.force == true
+        uses: actions/cache@v4
+        with:
+          path: .cache
+          key: embeddings-v1-${{ hashFiles('docs/src/pages/**/*.mdx') }}
+          restore-keys: |
+            embeddings-v1-
+
+      - name: Install Python dependencies
+        if: steps.deployed.outputs.cache-hit != 'true' || inputs.force == true
+        run: pip install -r requirements.txt
+
+      - name: Build document indexes
+        if: steps.deployed.outputs.cache-hit != 'true' || inputs.force == true
+        run: python -m ingest.run_all
+        env:
+          USE_MOCK: "false"
+          LIARA_AI_BASE_URL: ${{ secrets.LIARA_AI_BASE_URL }}
+          LIARA_AI_API_KEY: ${{ secrets.LIARA_AI_API_KEY }}
+          MODEL_EMBEDDING: ${{ vars.MODEL_EMBEDDING || 'openai/text-embedding-3-small' }}
+
+      - name: Validate generated indexes
+        if: steps.deployed.outputs.cache-hit != 'true' || inputs.force == true
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import pickle
+          from pathlib import Path
+
+          import numpy as np
+
+          data = Path("data")
+          chunks = json.loads((data / "chunks.json").read_text(encoding="utf-8"))
+          vectors = np.load(data / "vectors.npy", mmap_mode="r")
+          with (data / "bm25.pkl").open("rb") as file:
+              bm25 = pickle.load(file)
+
+          if not chunks:
+              raise SystemExit("No documentation chunks were generated")
+          if vectors.ndim != 2 or vectors.shape[0] != len(chunks):
+              raise SystemExit("chunks.json and vectors.npy are inconsistent")
+          if len(bm25.doc_freqs) != len(chunks):
+              raise SystemExit("chunks.json and bm25.pkl are inconsistent")
+
+          print(f"Validated {len(chunks)} documentation chunks")
+          PY
+
+      - name: Set up Node.js
+        if: steps.deployed.outputs.cache-hit != 'true' || inputs.force == true
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Liara CLI
+        if: steps.deployed.outputs.cache-hit != 'true' || inputs.force == true
+        run: npm install --global @liara/cli@9
+
+      - name: Deploy to Liara
+        if: steps.deployed.outputs.cache-hit != 'true' || inputs.force == true
+        env:
+          LIARA_API_TOKEN: ${{ secrets.LIARA_API_TOKEN }}
+          LIARA_APP_NAME: ${{ vars.LIARA_APP_NAME || 'liara-docs-assistant' }}
+        shell: bash
+        run: |
+          liara deploy \
+            --api-token "$LIARA_API_TOKEN" \
+            --app "$LIARA_APP_NAME" \
+            --platform docker \
+            --port 8000 \
+            --no-app-logs \
+            --message "sync docs ${{ steps.docs.outputs.sha }}"
+
+      # actions/cache saves this marker only after every previous step succeeds.
+      - name: Mark documentation revision as deployed
+        if: steps.deployed.outputs.cache-hit != 'true' || inputs.force == true
+        shell: bash
+        run: |
+          mkdir -p .sync-state
+          echo "${{ steps.docs.outputs.sha }}" > .sync-state/docs-sha

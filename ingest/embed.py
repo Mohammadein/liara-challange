@@ -42,7 +42,10 @@ def _client() -> OpenAI:
             "LIARA_AI_API_KEY یا LIARA_AI_BASE_URL تنظیم نشده.\n"
             "فایل .env را بسازید و مقادیر را از کنسول لیارا > هوش مصنوعی بردارید."
         )
-    return OpenAI(base_url=settings.liara_ai_base_url, api_key=settings.liara_ai_api_key)
+    return OpenAI(
+        base_url=settings.liara_ai_base_url,
+        api_key=settings.liara_ai_api_key_value,
+    )
 
 
 def _cache_path():
