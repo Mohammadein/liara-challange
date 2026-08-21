@@ -153,6 +153,35 @@ def error_signature(log: str) -> str:
     return re.sub(r"\s+", " ", sig).strip()[:300]
 
 
+async def _symptom_query(text: str) -> str:
+    """
+    خطای انگلیسی → توصیف فارسی همان مشکل، به زبان مستندات.
+
+    یک تماس ارزان با مدل کوچک. اگر شکست بخورد، رشته‌ی خالی برمی‌گردد و
+    جستجو با امضای خام ادامه می‌یابد — ترجمه‌ی ناموفق نباید ابزار را بکشد.
+    """
+    if not text.strip():
+        return ""
+    try:
+        from app.llm import aclient
+        from app.prompts import SYMPTOM_SYSTEM
+        from app.settings import settings
+
+        resp = await aclient().chat.completions.create(
+            model=settings.model_fast,
+            messages=[
+                {"role": "system", "content": SYMPTOM_SYSTEM},
+                {"role": "user", "content": text[:600]},
+            ],
+            temperature=0,
+            max_tokens=60,
+        )
+        return (resp.choices[0].message.content or "").strip().strip('"')
+    except Exception as exc:
+        log.warning("symptom translation failed: %s", type(exc).__name__)
+        return ""
+
+
 # ------------------------------------------------------------ جعبه ابزار
 
 class ToolBox:
@@ -214,17 +243,27 @@ class ToolBox:
             "excerpts": self._excerpts(hits[:4]),
         }
 
-    def diagnose_error(self, log: str, platform: str | None = None) -> dict:
+    async def diagnose_error(self, log: str, platform: str | None = None) -> dict:
         sig = error_signature(log)
-        query = f"{sig} {platform}" if platform else sig
+        symptom = await _symptom_query(sig or log[:300])
 
-        # هم امضای خطا هم لاگ خام — امضا ممکن است بخش مهمی را نگرفته باشد
-        hits = self.r.search([sig, log[:400]] if sig else log[:400], k=self.k)
+        # سه کوئری با هم: امضای خطا، ترجمه‌ی فارسی علامت، و لاگ خام.
+        #
+        # امضا معمولاً انگلیسی است ولی مستندات لیارا همان خطا را فارسی
+        # توصیف می‌کند، پس تطابق واژگانی صفر است. نمونه‌ی واقعی:
+        # «Could not find a version that satisfies...» هیچ‌وقت صفحه‌ی
+        # mirror را پیدا نمی‌کرد و پاسخ می‌شد «نسخه دیگری امتحان کن» —
+        # که راه‌حل واقعی لیارا نیست.
+        queries = [q for q in (symptom, sig, log[:300]) if q]
+        if platform:
+            queries.insert(0, f"{symptom or sig} {platform}")
+
+        hits = self.r.search(queries, k=self.k)
         self._collect(hits)
 
         return {
             "error_signature": sig or "(الگوی مشخصی پیدا نشد)",
-            "search_query": query,
+            "symptom_query": symptom,
             "excerpts": self._excerpts(hits[:6]),
             "note": (
                 "اگر این متن‌ها علت خطا را پوشش نمی‌دهند، صادقانه بگو که در "
@@ -234,14 +273,14 @@ class ToolBox:
 
     # ---------------------------------------------------------- اجرا
 
-    def run(self, name: str, args: dict) -> str:
+    async def run(self, name: str, args: dict) -> str:
         try:
             if name == "list_variants":
                 result = self.list_variants(
                     str(args.get("topic", "")), args.get("variant")
                 )
             elif name == "diagnose_error":
-                result = self.diagnose_error(
+                result = await self.diagnose_error(
                     str(args.get("log", "")), args.get("platform")
                 )
             else:

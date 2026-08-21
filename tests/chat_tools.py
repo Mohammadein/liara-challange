@@ -60,22 +60,20 @@ CASES = [
                "اینکه بگوید نسخه دیگری انتخاب کن.",
     },
     {
-        "name": "diagnose_error — تایم‌اوت ورکر",
+        "name": "تایم‌اوت ورکر — پاسخ درست، ابزار اختیاری",
         "message": "لاگ برنامه‌م پره از این:\n[CRITICAL] WORKER TIMEOUT (pid:42)",
-        "expect": {
-            "tools_any": ["diagnose_error"],
-            "answer_any": ["timeout", "تایم", "worker", "ورکر", "gunicorn"],
-        },
-        "why": "امضای خطا WORKER TIMEOUT است و مستندات صفحه اختصاصی دارد.",
+        "expect": {"answer_any": ["GUNICORN_TIMEOUT", "timeout", "تایم‌اوت"]},
+        "why": "اگر جستجوی اول جواب را دارد، صدا زدن ابزار فقط توکن و ثانیه "
+               "هدر می‌دهد. ادعا روی درستی پاسخ است نه روی صدا زدن ابزار.",
     },
     {
-        "name": "diagnose_error — ماژول پیدا نشد",
+        "name": "ماژول پیدا نشد — پاسخ درست",
         "message": "Traceback (most recent call last):\n"
                    "  File \"/app/main.py\", line 3, in <module>\n"
                    "    import psycopg2\n"
                    "ModuleNotFoundError: No module named 'psycopg2'",
-        "expect": {"tools_any": ["diagnose_error"]},
-        "why": "امضا باید ModuleNotFoundError باشد، نه مسیر فایل.",
+        "expect": {"answer_any": ["requirements.txt"]},
+        "why": "راه‌حل درست در لیارا افزودن ماژول به requirements.txt است.",
     },
     {
         "name": "ابهام — نباید ابزار بزند",

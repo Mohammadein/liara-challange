@@ -371,7 +371,7 @@ async def chat_stream(question: str, session_id: str) -> AsyncIterator[str]:
                 detail = args.get("topic") or args.get("variant") or ""
                 yield sse("tool", ToolEvent(name=c["name"], status="running",
                                             detail=detail))
-                result = box.run(c["name"], args)
+                result = await box.run(c["name"], args)
                 yield sse("tool", ToolEvent(
                     name=c["name"], status="done",
                     detail=_tool_detail(c["name"], result),
