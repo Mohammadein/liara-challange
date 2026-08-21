@@ -151,11 +151,17 @@ _DEPLOY = Flow(
             url_prefix="/paas/",
             service="paas",
         ),
+        # کوئری‌های سه قدم زیر عمداً از هم دور نگه داشته شده‌اند: یک صفحه‌ی
+        # مستندات هر سه را با هم پوشش می‌دهد و کوئری‌های نزدیک، متن یکسانی
+        # برمی‌گردانند — آن‌وقت مدل قدم بعدی را می‌نویسد و شماره‌ی روی
+        # stepper با متن یکی نمی‌شود.
         FlowStep(
             key="prepare_project",
             title="آماده‌سازی پروژه {platform_label} برای استقرار",
-            query="آماده‌سازی پروژه {platform_label} قبل از استقرار در لیارا",
-            goal="پروژه‌ی محلی همان چیزی باشد که لیارا انتظار دارد اجرا کند.",
+            query="وابستگی‌ها و دستور اجرای پروژه {platform_label} "
+                  "قبل از استقرار در لیارا",
+            goal="سورس پروژه آماده‌ی اجرا باشد: وابستگی‌ها اعلام‌شده و دستور "
+                 "اجرا مشخص.",
             url="{deploy_url}",
             url_prefix="{platform_prefix}",
             service="paas",
@@ -163,7 +169,7 @@ _DEPLOY = Flow(
         FlowStep(
             key="liara_json",
             title="نوشتن فایل liara.json",
-            query="فایل liara.json و تنظیمات پلتفرم {platform_label}",
+            query="ساختار و فیلدهای فایل liara.json",
             goal="پیکربندی استقرار در ریپو باشد، نه در حافظه‌ی شما.",
             url=f"{DOCS}/paas/liarajson/",
             url_prefix="/paas/",
@@ -172,7 +178,7 @@ _DEPLOY = Flow(
         FlowStep(
             key="deploy",
             title="استقرار با {method_label}",
-            query="استقرار برنامه {platform_label} با {method_label}",
+            query="اجرای دستور استقرار برنامه {platform_label} {method_phrase}",
             goal="اولین نسخه‌ی برنامه روی لیارا اجرا شده باشد.",
             url="{deploy_url}",
             url_prefix="{deploy_prefix}",
@@ -431,6 +437,14 @@ _EXIT_INTENTS = (
 _RESTATE_INTENTS = ("دوباره بگو", "همین قدم", "بیشتر توضیح", "متوجه نشدم")
 
 
+_FA_DIGITS = str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹")
+
+
+def fa(value) -> str:
+    """عدد با رقم فارسی — تا برچسب ابزار و stepper شبیه هم به نظر برسند."""
+    return str(value).translate(_FA_DIGITS)
+
+
 def _has(text: str, needles) -> bool:
     return any(n in text for n in needles)
 
@@ -581,6 +595,7 @@ def build_context(
     # برچسب فهرست فرم توضیح داخل پرانتز دارد («Docker (هر چیز دیگر)») که در
     # عنوان یک قدم و در کوئری جستجو فقط نویز است.
     label = re.sub(r"\s*\(.*?\)", "", PLATFORMS.get(platform or "", "")).strip()
+    method_label = DEPLOY_METHOD_LABELS.get(method or "") or method or ""
 
     return {
         "platform": platform or "",
@@ -599,10 +614,12 @@ def build_context(
         "db_url": f"{DOCS}/dbaas/{slug}/" if slug else f"{DOCS}/dbaas/about/",
         # `method` ممکن است کلید فرم («cli») یا برچسب واریانت بازیابی
         # («Liara CLI») باشد — هر دو پذیرفته می‌شوند.
-        "method_label": (
-            DEPLOY_METHOD_LABELS.get(method or "")
-            or method
-            or "روش دلخواه شما"
+        "method_label": method_label or "روش دلخواه شما",
+        # وقتی روش معلوم نیست، «با روش دلخواه شما» در کوئری فقط نویز است؛
+        # به‌جایش گزینه‌های واقعی جستجو می‌شوند.
+        "method_phrase": (
+            f"با {method_label}" if method_label
+            else "با کنسول لیارا، Liara CLI یا GitHub"
         ),
         # سیگنال‌های خام، برای ذخیره در FlowState و استفاده در نوبت‌های بعدی.
         "_platform": platform or "",

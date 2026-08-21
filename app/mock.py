@@ -236,7 +236,8 @@ async def _mock_flow(message: str, session) -> AsyncIterator[str]:
         **flows.progress_payload(flow, steps, state, status)))
     yield sse("tool", ToolEvent(
         name="flow_step", status="done",
-        detail=f"قدم {step.index} از {len(steps)} — {step.title}"))
+        detail=f"قدم {flows.fa(step.index)} از {flows.fa(len(steps))}"
+               f" — {step.title}"))
     yield sse("tool", ToolEvent(
         name="search_docs", status="running", detail=step.query))
     await asyncio.sleep(0.6)

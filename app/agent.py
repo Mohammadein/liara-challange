@@ -866,33 +866,77 @@ async def flow_stream(
         **flows.progress_payload(flow, steps, state, status)))
     yield sse("tool", ToolEvent(
         name="flow_step", status="done",
-        detail=f"قدم {step.index} از {len(steps)} — {step.title}",
+        detail=f"قدم {flows.fa(step.index)} از {flows.fa(len(steps))}"
+               f" — {step.title}",
     ))
     yield sse("tool", ToolEvent(
         name="search_docs", status="running", detail=step.query))
 
     hits = _flow_search(step, session, question, extra=(action == "stay"))
     yield sse("tool", ToolEvent(
-        name="search_docs", status="done", detail=f"{len(hits)} نتیجه"))
+        name="search_docs", status="done",
+        detail=f"{flows.fa(len(hits))} نتیجه"))
+
+    previous = next((s for s in steps if s.index == step.index - 1), None)
+    upcoming = next((s for s in steps if s.index == step.index + 1), None)
 
     system = (
         FLOW_STEP_SYSTEM
         + f"\n\n## Procedure\n«{flow.title}» — {flow.summary}\n\n"
         + "## Outline (fixed, do not change)\n"
         + flows.outline(steps, step.index)
-        + f"\n\n## Current step\n{step.index} از {len(steps)}: {step.title}\n"
+        + f"\n\n## Current step — write about THIS and only this\n"
+        + f"{step.index} از {len(steps)}: {step.title}\n"
         + f"هدف این قدم: {step.goal}\n"
         + (f"صفحه مرجع این قدم: {step.url}\n" if step.url else "")
     )
+
+    # مرزها صریح گفته می‌شوند چون متن‌های بازیابی‌شده‌ی قدم‌های همسایه به هم
+    # نزدیک‌اند: صفحه‌ی «آماده‌سازی پروژه» در مستندات لیارا خودش liara.json را
+    # هم توضیح می‌دهد. بدون این مرز، مدل محتوای قدم بعدی را می‌نویسد و
+    # شماره‌ی روی stepper با چیزی که کاربر می‌خواند یکی نمی‌شود.
+    system += "\n## Boundaries\n"
+    if previous:
+        system += (
+            f"قدم قبلی (قبلاً توضیح داده شده، تکرارش نکن): {previous.title}\n"
+        )
+    if upcoming:
+        system += (
+            f"قدم بعدی (هنوز نه): {upcoming.title}\n"
+            "اگر متن‌های مستندات درباره‌ی این موضوع بودند، آن بخش را ننویس — "
+            "مال نوبت بعدی است.\n"
+        )
+    else:
+        system += "این آخرین قدم است.\n"
+
     if state.done:
         titles = [s.title for s in steps if s.key in state.done]
         system += "\n## Already done\n" + "، ".join(titles) + "\n"
     if session.profile:
         system += "\n## This user's project\n" + session.profile.as_context()
 
+    # «قدم بعد» یک **دستور ناوبری** است، نه سؤال — و هرگز نباید به‌عنوان
+    # پیام کاربر به مدل برسد.
+    #
+    # این باگ واقعی بود: مدل عبارت «قدم بعد» را می‌خواند، آن را درخواستِ
+    # «قدمِ بعد از قدم جاری» می‌فهمید و یک قدم جلوتر را می‌نوشت. نتیجه اینکه
+    # روی stepper «قدم ۲» بود ولی متن، قدم ۳ را توضیح می‌داد. حرکت قبلاً در
+    # `_advance` انجام شده؛ مدل فقط باید همان قدمی را بنویسد که به او داده‌ایم.
+    if action == "stay":
+        request = question
+        history = session.history()
+    else:
+        request = (
+            f"قدم {step.index} از {len(steps)} این فرآیند را توضیح بده: "
+            f"{step.title}"
+        )
+        # تاریخچه هم عمداً حذف می‌شود: آخرین نوبت، متنِ کاملِ قدم قبلی است و
+        # مدل را به «ادامه دادن» تشویق می‌کند، نه به نوشتن قدم داده‌شده.
+        history = []
+
     user = (
         f"# متن مستندات\n\n{build_context(hits)}\n\n"
-        f"# پیام کاربر\n\n{question}"
+        f"# درخواست\n\n{request}"
     )
 
     answer = ""
@@ -900,7 +944,7 @@ async def flow_stream(
         model=settings.model_answer,
         messages=[
             {"role": "system", "content": system},
-            *session.history(),
+            *history,
             {"role": "user", "content": user},
         ],
         temperature=0.2,
@@ -1053,7 +1097,7 @@ async def chat_stream(
         if service:
             session.service = service
         yield sse("tool", ToolEvent(name="search_docs", status="done",
-                                    detail=f"{len(hits)} نتیجه"))
+                                    detail=f"{flows.fa(len(hits))} نتیجه"))
 
         # --- ۴. پاسخ ---
         context = build_context(hits)
