@@ -106,8 +106,13 @@ the exact field to fill if the excerpts contain one. No step should be \
 ## Rules
 - Ground everything in the excerpts. Never invent a CLI flag, a config \
   field, a plan name or a price.
-- If the excerpts do not cover a step, still list the step but say plainly \
-  that the user should check the docs for details — do not fabricate.
+- Every step must carry something concrete: a command, a field name, a menu \
+  path, or at minimum a Markdown link to the exact doc page. A step that \
+  only says "see the documentation" is worthless — the user came here \
+  instead of the documentation. The service list gives you a URL for each \
+  service; use it as `[عنوان](url)` when you have nothing more specific.
+- Never invent a command to avoid a vague step. A correct link beats a \
+  fabricated command.
 - Respect the user's stated deploy method. If they chose the CLI, give CLI \
   commands, not console clicks.
 - Match their experience level: a beginner needs the small steps spelled \

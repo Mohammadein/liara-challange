@@ -238,8 +238,12 @@ async def build_plan(profile, services: list[dict]) -> dict:
     started = time.perf_counter()
     retriever = get_retriever()
 
-    # بازیابی هدفمند به ازای هر سرویس، با سهم کوچک از context
-    per_service = max(2, settings.top_k // max(len(services), 1))
+    # بازیابی هدفمند به ازای هر سرویس.
+    #
+    # سهم را با تعداد سرویس‌ها تقسیم نمی‌کنیم: با ۵ سرویس، هرکدام ۲ تکه
+    # می‌گرفت و مدل چیزی برای گفتن نداشت، پس چهار قدم پشت سر هم می‌نوشت
+    # «به مستندات مراجعه کنید». نقشه‌ای که جزئیات ندارد، نقشه نیست.
+    per_service = 4
     hits: list[Hit] = []
     seen: set[str] = set()
 
@@ -253,7 +257,11 @@ async def build_plan(profile, services: list[dict]) -> dict:
                 seen.add(h.id)
                 hits.append(h)
 
-    service_list = "\n".join(f"- {s['title']} ({s['why']})" for s in services)
+    # لینک هر سرویس به مدل داده می‌شود تا قدم‌های بی‌جزئیات دست‌کم لینک
+    # درست داشته باشند، نه «به مستندات مراجعه کنید» بدون گفتن کجا.
+    service_list = "\n".join(
+        f"- {s['title']} ({s['why']}) — {s['url']}" for s in services
+    )
     user_msg = (
         f"# پروفایل پروژه\n{profile.as_context()}\n\n"
         f"# سرویس‌های لازم (قطعی، تغییرشان نده)\n{service_list}\n\n"

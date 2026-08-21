@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>پروژه‌ی من — دستیار مستندات لیارا</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%232196f3'/><text x='16' y='23' font-size='19' text-anchor='middle' fill='white' font-family='sans-serif'>ل</text></svg>">
+<!--
+  نمونه‌ی مرجع فرم پروژه.
+
+  رضایی: فیلدها از /api/v1/project/options می‌آیند، نه از این فایل.
+  اگر پلتفرم جدیدی به لیارا اضافه شود، فقط app/project.py عوض می‌شود و
+  فرم خودکار به‌روز می‌شود. هر چیزی که اینجا hardcode کنی، روزی از سرور
+  جدا می‌افتد.
+
+  بدون CDN — هر کتابخانه‌ای لازم شد باید داخل static/ کپی شود.
+-->
+<style>
+  :root {
+    --bg:#0f1115; --panel:#171a21; --panel-2:#1e222b; --border:#2a2f3a;
+    --text:#e6e8ec; --muted:#98a0ae; --accent:#2196f3; --ok:#3ddc84;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0;background:var(--bg);color:var(--text);
+    font-family:system-ui,"Segoe UI",Tahoma,sans-serif;line-height:1.85;
+  }
+  .wrap{max-width:780px;margin:0 auto;padding:24px 16px 60px}
+  header{display:flex;align-items:baseline;gap:12px;margin-bottom:6px;flex-wrap:wrap}
+  h1{font-size:20px;margin:0}
+  header a{color:var(--accent);font-size:13px;text-decoration:none}
+  .lede{color:var(--muted);font-size:14px;margin:0 0 24px}
+  .field{margin-bottom:18px}
+  label{display:block;font-size:14px;font-weight:600;margin-bottom:6px}
+  .help{font-size:12px;color:var(--muted);margin-bottom:8px}
+  input,select,textarea{
+    width:100%;background:var(--panel);color:var(--text);
+    border:1px solid var(--border);border-radius:10px;padding:11px 13px;
+    font:inherit;font-size:14px;
+  }
+  textarea{resize:vertical;min-height:88px}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent)}
+  .chips{display:flex;flex-wrap:wrap;gap:8px}
+  .chip{
+    display:flex;align-items:center;gap:8px;background:var(--panel);
+    border:1px solid var(--border);border-radius:999px;padding:7px 14px;
+    font-size:13px;cursor:pointer;user-select:none;
+  }
+  .chip.on{border-color:var(--accent);background:#16283c}
+  .chip input{display:none}
+  button{
+    background:var(--accent);color:#fff;border:0;border-radius:10px;
+    padding:12px 26px;font:inherit;font-size:15px;cursor:pointer;
+  }
+  button:disabled{opacity:.45;cursor:not-allowed}
+  #out{margin-top:32px}
+  .card{
+    background:var(--panel);border:1px solid var(--border);
+    border-radius:12px;padding:14px 16px;margin-bottom:10px;
+  }
+  .card h4{margin:0 0 4px;font-size:14px}
+  .card .why{color:var(--muted);font-size:13px}
+  .card a{color:var(--accent);font-size:12.5px;text-decoration:none}
+  h3{font-size:15px;margin:26px 0 12px;color:var(--muted);font-weight:600}
+  pre{
+    direction:ltr;text-align:left;background:#0b0d11;border:1px solid var(--border);
+    border-radius:10px;padding:12px 14px;overflow-x:auto;font-size:13px;
+  }
+  code{font-family:ui-monospace,Consolas,monospace}
+  :not(pre)>code{
+    direction:ltr;display:inline-block;background:var(--panel-2);
+    border:1px solid var(--border);border-radius:5px;padding:1px 6px;font-size:12.5px;
+  }
+  .plan{background:var(--panel);border:1px solid var(--border);
+        border-radius:12px;padding:18px 20px;white-space:pre-wrap}
+  .meta{font-size:12px;color:var(--muted);margin-top:12px}
+  .err{border-color:#7f2b2b;background:#2a1414;color:#ffb4b4}
+  .spin{color:var(--muted);font-size:14px}
+  .done{color:var(--ok)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>پروژه‌ی من</h1>
+  <a href="/">← برگرد به چت</a>
+</header>
+<p class="lede">
+  بگو چه می‌خواهی بسازی تا بگویم روی لیارا به چه سرویس‌هایی نیاز داری و از
+  کجا شروع کنی. بعد از این، پاسخ‌های چت هم مخصوص پروژه‌ی خودت می‌شود.
+</p>
+
+<form id="f"><div id="fields" class="spin">در حال بارگذاری فرم…</div></form>
+
+<div id="out"></div>
+
+</div>
+
+<script>
+const SESSION_ID = localStorage.getItem("liara_session")
+  || (localStorage.setItem("liara_session", crypto.randomUUID()),
+      localStorage.getItem("liara_session"));
+
+const fieldsEl = document.getElementById("fields");
+const formEl   = document.getElementById("f");
+const outEl    = document.getElementById("out");
+
+function esc(s){
+  return String(s).replace(/[&<>"']/g, c =>
+    ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+
+/* فرم از سرور ساخته می‌شود — هیچ فیلدی اینجا hardcode نیست */
+fetch("/api/v1/project/options")
+  .then(r => r.json())
+  .then(data => {
+    fieldsEl.className = "";
+    fieldsEl.innerHTML = data.fields.map(f => {
+      const help = f.help ? `<div class="help">${esc(f.help)}</div>` : "";
+      let control;
+
+      if (f.type === "text") {
+        control = `<textarea name="${f.name}" ${f.required ? "required" : ""}
+                     placeholder="${esc(f.placeholder || "")}"></textarea>`;
+      } else if (f.type === "select") {
+        control = `<select name="${f.name}">
+            <option value="">— مهم نیست / نمی‌دانم —</option>` +
+          f.options.map(o =>
+            `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join("") +
+          `</select>`;
+      } else {
+        control = `<div class="chips">` + f.options.map(o =>
+          `<label class="chip">
+             <input type="checkbox" name="${f.name}" value="${esc(o.value)}">
+             <span>${esc(o.label)}</span>
+           </label>`).join("") + `</div>`;
+      }
+
+      return `<div class="field">
+                <label>${esc(f.label)}${f.required ? " *" : ""}</label>
+                ${help}${control}
+              </div>`;
+    }).join("") + `<button type="submit" id="go">بساز نقشه‌ام را</button>`;
+
+    // تیک‌ها را دیداری کن
+    fieldsEl.addEventListener("change", e => {
+      if (e.target.type === "checkbox")
+        e.target.closest(".chip").classList.toggle("on", e.target.checked);
+    });
+  })
+  .catch(e => {
+    fieldsEl.className = "card err";
+    fieldsEl.textContent = "فرم بارگذاری نشد: " + e;
+  });
+
+formEl.addEventListener("submit", async e => {
+  e.preventDefault();
+  const btn = document.getElementById("go");
+  btn.disabled = true;
+  outEl.innerHTML = `<p class="spin">در حال ساخت نقشه… (چند ثانیه طول می‌کشد)</p>`;
+
+  const fd = new FormData(formEl);
+  const body = {
+    session_id:    SESSION_ID,
+    description:   fd.get("description") || "",
+    platform:      fd.get("platform") || null,
+    database:      fd.get("database") || null,
+    deploy_method: fd.get("deploy_method") || null,
+    experience:    fd.get("experience") || "intermediate",
+    needs:         fd.getAll("needs"),
+  };
+
+  try {
+    const res = await fetch("/api/v1/project/plan", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.message || ("HTTP " + res.status));
+    render(data);
+  } catch (err) {
+    outEl.innerHTML = `<div class="card err">${esc(err.message)}</div>`;
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+function render(d){
+  const services = d.services.map(s => `
+    <div class="card">
+      <h4>${esc(s.title)}</h4>
+      <div class="why">${esc(s.why)}</div>
+      <a href="${esc(s.url)}" target="_blank" rel="noopener">مستندات ↗</a>
+    </div>`).join("");
+
+  const sources = (d.sources || []).map(s =>
+    `<div class="card"><a href="${esc(s.url)}" target="_blank" rel="noopener">
+       ${esc(s.title)}${s.section ? " › " + esc(s.section) : ""}</a></div>`).join("");
+
+  outEl.innerHTML = `
+    <h3>سرویس‌هایی که لازم داری</h3>${services}
+    <h3>از کجا شروع کن</h3>
+    <div class="plan">${renderMd(d.plan)}</div>
+    <h3>فایل liara.json</h3>
+    <pre><code>${esc(JSON.stringify(d.liara_json, null, 2))}</code></pre>
+    ${sources ? `<h3>منابع</h3>${sources}` : ""}
+    <p class="meta done">
+      ✓ پروفایل ذخیره شد — از این به بعد پاسخ‌های چت مخصوص همین پروژه است.
+      <br>${d.usage.tokens} توکن · ${d.usage.latency_ms} میلی‌ثانیه
+    </p>`;
+  outEl.scrollIntoView({behavior:"smooth", block:"start"});
+}
+
+/* رندر حداقلی مارک‌داون — همان منطق app.js */
+function renderMd(text){
+  const blocks = [];
+  let out = text.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
+    blocks.push(`<pre><code>${esc(code.trim())}</code></pre>`);
+    return `⸢B${blocks.length - 1}⸣`;
+  });
+  out = esc(out)
+    .replace(/`([^`\n]+)`/g, (_, c) => `<code>${c}</code>`)
+    .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/^### (.+)$/gm, "<strong>$1</strong>");
+  return out.replace(/⸢B(\d+)⸣/g, (_, i) => blocks[Number(i)]);
+}
+</script>
+</body>
+</html>
