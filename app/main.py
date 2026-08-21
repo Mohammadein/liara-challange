@@ -16,6 +16,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.api_project import router as api_project_router
 from app.api_v1 import router as api_v1_router
 from app.contracts import ChatRequest, ErrorEvent, sse
 from app.mock import mock_chat_stream
@@ -58,6 +59,7 @@ app = FastAPI(
 )
 
 app.include_router(api_v1_router)
+app.include_router(api_project_router)
 
 
 # ---------------------------------------------------------------- health

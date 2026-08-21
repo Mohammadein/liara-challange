@@ -35,7 +35,7 @@ from app.contracts import (
     sse,
 )
 from app.llm import LLMUnavailable, aclient
-from app.prompts import ANSWER_SYSTEM, REWRITE_SYSTEM, build_context
+from app.prompts import ANSWER_SYSTEM, PLAN_SYSTEM, REWRITE_SYSTEM, build_context
 from app.retrieval import Hit, Retriever
 from app.tools import TOOL_SPECS, ToolBox
 from app.session import Session, sessions
@@ -227,6 +227,57 @@ async def answer_once(
     )
 
 
+async def build_plan(profile, services: list[dict]) -> dict:
+    """
+    پروفایل پروژه → نقشه‌ی استقرار.
+
+    برای هر سرویس لازم یک بازیابی جدا انجام می‌شود، نه یک جستجوی کلی.
+    دلیلش: «دیتابیس postgres» و «آپلود فایل» و «کرون‌جاب» سه موضوع کاملاً
+    متفاوت‌اند و یک کوئری ترکیبی برای هیچ‌کدام تکه‌ی خوبی نمی‌آورد.
+    """
+    started = time.perf_counter()
+    retriever = get_retriever()
+
+    # بازیابی هدفمند به ازای هر سرویس، با سهم کوچک از context
+    per_service = max(2, settings.top_k // max(len(services), 1))
+    hits: list[Hit] = []
+    seen: set[str] = set()
+
+    queries = [f"{s['title']} در لیارا" for s in services]
+    if profile.platform:
+        queries.append(f"استقرار برنامه {profile.platform}")
+
+    for q in queries:
+        for h in retriever.search(q, k=per_service, variant=profile.variant_hint):
+            if h.id not in seen:
+                seen.add(h.id)
+                hits.append(h)
+
+    service_list = "\n".join(f"- {s['title']} ({s['why']})" for s in services)
+    user_msg = (
+        f"# پروفایل پروژه\n{profile.as_context()}\n\n"
+        f"# سرویس‌های لازم (قطعی، تغییرشان نده)\n{service_list}\n\n"
+        f"# متن مستندات\n{build_context(hits)}"
+    )
+
+    resp = await aclient().chat.completions.create(
+        model=settings.model_answer,
+        messages=[
+            {"role": "system", "content": PLAN_SYSTEM},
+            {"role": "user", "content": user_msg},
+        ],
+        temperature=0.3,
+        max_tokens=1600,
+    )
+
+    return {
+        "plan": resp.choices[0].message.content or "",
+        "sources": [s.model_dump() for s in _sources(hits)],
+        "tokens": resp.usage.total_tokens if resp.usage else 0,
+        "latency_ms": int((time.perf_counter() - started) * 1000),
+    }
+
+
 def _tool_detail(name: str, raw_result: str) -> str:
     """
     خلاصه‌ی نتیجه‌ی ابزار برای نمایش در UI.
@@ -289,9 +340,17 @@ async def chat_stream(question: str, session_id: str) -> AsyncIterator[str]:
         yield sse("tool", ToolEvent(name="search_docs", status="running",
                                     detail="جستجوی مستندات"))
         service = plan["service"] or session.service
-        # هم سؤال خام هم بازنویسی‌شده — بازنویسی نباید اطلاعات را بخورد
+        profile = session.profile
+
+        # پلتفرم پروفایل به کوئری اضافه می‌شود تا نسخه‌ی درست صفحه بالا
+        # بیاید: کاربر جنگویی نباید مستندات nodejs بگیرد.
+        queries = [question, plan["query"]]
+        if profile and profile.platform:
+            queries.append(f"{plan['query']} {profile.platform}")
+
         hits = get_retriever().search(
-            [question, plan["query"]], k=settings.top_k, service=service
+            queries, k=settings.top_k, service=service,
+            variant=session.variant or (profile.variant_hint if profile else None),
         )
 
         if service:
@@ -301,8 +360,20 @@ async def chat_stream(question: str, session_id: str) -> AsyncIterator[str]:
 
         # --- ۴. پاسخ ---
         context = build_context(hits)
+        system = ANSWER_SYSTEM
+        if profile:
+            # پروفایل در پیام سیستم می‌آید نه در پیام کاربر: باید در تمام
+            # نوبت‌های مکالمه معتبر بماند، نه فقط همین یکی.
+            system += (
+                "\n\n## This user's project\n"
+                "They already told you about their project. Use it: answer for "
+                "their platform without asking, and do not ask questions the "
+                "profile already answers.\n\n"
+                + profile.as_context()
+            )
+
         messages = [
-            {"role": "system", "content": ANSWER_SYSTEM},
+            {"role": "system", "content": system},
             *session.history(),
             {"role": "user", "content":
                 f"# متن مستندات\n\n{context}\n\n# سؤال کاربر\n\n{question}"},

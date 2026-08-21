@@ -25,6 +25,7 @@ class Session:
     turns: list[dict] = field(default_factory=list)
     service: str | None = None    # سرویسی که کاربر رویش کار می‌کند
     variant: str | None = None    # فریم‌ورک/روش ترجیحی کاربر
+    profile: object | None = None  # ProjectProfile — از فرم پروژه
     touched: float = field(default_factory=time.time)
 
     def add(self, role: str, content: str) -> None:
