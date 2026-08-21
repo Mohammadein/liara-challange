@@ -40,6 +40,10 @@ class Session:
     turns: list[dict[str, Any]] = field(default_factory=list)
     service: str | None = None
     variant: str | None = None
+    # پلتفرمی که کاربر در گفتگو **گفته** — جدا از پروفایل فرم، چون بیشتر
+    # کاربرها فرم را پر نمی‌کنند ولی در پیام اول می‌گویند «داکر». اگر این را
+    # نگه نداریم، پیام سوم دوباره پاسخ عمومی می‌گیرد.
+    platform: str | None = None
     profile: object | None = None
     # فرآیند چندمرحله‌ای در جریان. کنار پروفایل می‌ماند نه در حافظه‌ی موقت،
     # چون کاربر ممکن است قدم سوم را فردا ادامه بدهد.
@@ -142,6 +146,7 @@ class SessionStore:
             # پیشنهادها ساخته شده‌اند. بدون این، یک دیپلوی روی دیسک موجود با
             # «no such column» می‌افتد.
             self._add_column(conn, "sessions", "flow_json", "TEXT")
+            self._add_column(conn, "sessions", "platform", "TEXT")
             self._add_column(
                 conn, "messages", "suggestions_json", "TEXT NOT NULL DEFAULT '[]'"
             )
@@ -187,6 +192,7 @@ class SessionStore:
         return Session(
             id=row["id"], owner_id=row["owner_id"], title=row["title"],
             turns=turns, service=row["service"], variant=row["variant"],
+            platform=self._column(row, "platform"),
             profile=self._profile_from_json(row["profile_json"]),
             flow=self._flow_from_json(self._column(row, "flow_json")),
             created_at=row["created_at"], touched=row["updated_at"], _store=self,
@@ -290,8 +296,9 @@ class SessionStore:
     ) -> None:
         conn.execute(
             "UPDATE sessions SET title = ?, service = ?, variant = ?, "
-            "profile_json = ?, flow_json = ?, updated_at = ? WHERE id = ?",
-            (session.title, session.service, session.variant,
+            "platform = ?, profile_json = ?, flow_json = ?, updated_at = ? "
+            "WHERE id = ?",
+            (session.title, session.service, session.variant, session.platform,
              self._profile_to_json(session.profile),
              self._flow_to_json(session.flow), when, session.id),
         )

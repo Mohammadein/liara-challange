@@ -167,6 +167,18 @@ def _pick_scenario(message: str) -> str:
     return "normal"
 
 
+def _mock_ctx(session, message: str, state) -> dict:
+    """همان قاعده‌ی حافظه‌ی بک‌اند واقعی، تا mock هم درست به نظر برسد."""
+    evidence = " ".join(
+        turn["content"] for turn in session.turns[-8:] if turn["role"] == "user"
+    )
+    hints = dict(state.hints) if state else {}
+    platform = flows.detect_platform(f"{evidence} {message}")
+    if platform:
+        hints.setdefault("platform", platform)
+    return flows.build_context(None, message, hints=hints)
+
+
 async def _mock_flow(message: str, session) -> AsyncIterator[str]:
     """
     یک فرآیند نمونه با وضعیت واقعی، تا stepper بدون LLM قابل ساخت باشد.
@@ -177,7 +189,7 @@ async def _mock_flow(message: str, session) -> AsyncIterator[str]:
     flow = flows.flow_by_id(state.id) if state else None
 
     if flow and flows.exit_intent(message):
-        steps = flows.resolve(flow, flows.build_context(None, message))
+        steps = flows.resolve(flow, _mock_ctx(session, message, state))
         session.flow = None
         session.save()
         yield sse("flow", FlowEvent(
@@ -199,7 +211,9 @@ async def _mock_flow(message: str, session) -> AsyncIterator[str]:
         state = FlowState(id=flow.id)
         status = "started"
 
-    steps = flows.resolve(flow, flows.build_context(None, message))
+    ctx = _mock_ctx(session, message, state)
+    state.hints = {**state.hints, **flows.hints_from(ctx)}
+    steps = flows.resolve(flow, ctx)
 
     if state.step >= len(steps):
         session.flow = None

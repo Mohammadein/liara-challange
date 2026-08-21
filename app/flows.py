@@ -93,14 +93,25 @@ class Flow:
 
 @dataclass
 class FlowState:
-    """وضعیت فرآیند در یک گفتگو. در session ذخیره و از SQLite بازخوانی می‌شود."""
+    """
+    وضعیت فرآیند در یک گفتگو. در session ذخیره و از SQLite بازخوانی می‌شود.
+
+    `hints` سیگنال‌هایی است که فرآیند با آن‌ها شروع شده — پلتفرم و موتور
+    دیتابیس. بدون این، پیام «قدم بعد» هیچ اطلاعاتی ندارد و قدم دوم دوباره
+    عمومی می‌شود: کاربری که در پیام اول گفته «داکر»، در قدم دوم راهنمای PHP
+    و Go می‌گیرد. آنچه کاربر یک بار گفته نباید دوباره پرسیده یا فراموش شود.
+    """
 
     id: str
     step: int = 0                              # ایندکس ۰-پایه‌ی قدم جاری
     done: list[str] = field(default_factory=list)
+    hints: dict[str, str] = field(default_factory=dict)
 
     def as_dict(self) -> dict:
-        return {"id": self.id, "step": self.step, "done": list(self.done)}
+        return {
+            "id": self.id, "step": self.step,
+            "done": list(self.done), "hints": dict(self.hints),
+        }
 
     @classmethod
     def from_dict(cls, data: dict | None) -> "FlowState | None":
@@ -108,10 +119,14 @@ class FlowState:
             return None
         if data["id"] not in FLOWS:
             return None
+        raw_hints = data.get("hints")
         return cls(
             id=str(data["id"]),
             step=max(0, int(data.get("step") or 0)),
             done=[str(k) for k in (data.get("done") or [])],
+            hints={
+                str(k): str(v) for k, v in (raw_hints or {}).items() if v
+            } if isinstance(raw_hints, dict) else {},
         )
 
 
@@ -486,10 +501,12 @@ _PLATFORM_ALIASES: dict[str, tuple[str, ...]] = {
     "django": ("django", "جنگو"),
     "flask": ("flask", "فلسک"),
     "python": ("fastapi", "فست ای پی ای", "پایتون", "python"),
-    "nodejs": ("nodejs", "node js", "نودجی اس", "نود"),
+    # «نود» تنها عمداً اینجا نیست: در فارسی یعنی عدد ۹۰ و «نود درصد کاربرها»
+    # را به پلتفرم Node.js تبدیل می‌کرد.
+    "nodejs": ("nodejs", "node js", "نودجی اس", "نود جی اس"),
     "nextjs": ("nextjs", "next js", "نکست"),
     "react": ("react", "ری اکت"),
-    "vue": ("vue", "ویو"),
+    "vue": ("vue", "ویو جی اس", "vuejs"),
     "angular": ("angular", "انگولار"),
     "laravel": ("laravel", "لاراول"),
     "php": ("php", "پی اچ پی"),
@@ -500,7 +517,7 @@ _PLATFORM_ALIASES: dict[str, tuple[str, ...]] = {
 }
 
 
-def _detect_platform(text: str) -> str | None:
+def detect_platform(text: str) -> str | None:
     normalized = f" {normalize(text)} "
     for platform, aliases in _PLATFORM_ALIASES.items():
         if any(alias in normalized for alias in aliases):
@@ -508,7 +525,7 @@ def _detect_platform(text: str) -> str | None:
     return None
 
 
-def _detect_engine(text: str) -> str | None:
+def detect_engine(text: str) -> str | None:
     normalized = f" {normalize(text)} "
     for engine, aliases in DATABASE_ENGINE_ALIASES.items():
         if any(alias in normalized for alias in aliases):
@@ -516,28 +533,58 @@ def _detect_engine(text: str) -> str | None:
     return None
 
 
-def build_context(profile, text: str = "") -> dict[str, str]:
-    """
-    جای‌نگهدارهای قدم‌ها را از پروفایل و متن کاربر پر می‌کند.
+# نام‌های قدیمی، برای کدی که هنوز آن‌ها را صدا می‌زند.
+_detect_platform = detect_platform
+_detect_engine = detect_engine
 
-    ترتیب اولویت: پروفایل (چون صریح است) بعد متن پیام. هر کلید همیشه مقدار
-    دارد؛ یک `{platform}` پرنشده در URL یعنی لینک خراب در دموی جلوی داور.
+
+def build_context(
+    profile,
+    text: str = "",
+    hints: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """
+    جای‌نگهدارهای قدم‌ها را پر می‌کند.
+
+    ترتیب اولویت: **متن همین پیام → پروفایل → hint**.
+
+    متن اول است چون تازه‌ترین حرف صریح کاربر است؛ hint آخر است چون فقط
+    حافظه‌ی چیزی است که قبلاً گفته شده. اما hint حیاتی است: پیام «قدم بعد»
+    هیچ کلمه‌ای ندارد، و بدون حافظه، قدم دوم پلتفرمی را که کاربر در پیام اول
+    گفته بود از دست می‌دهد.
+
+    هر کلید همیشه مقدار دارد؛ یک `{platform}` پرنشده در URL یعنی لینک خراب
+    در دموی جلوی داور.
     """
     from app.project import PLATFORMS
 
-    platform = getattr(profile, "platform", None) or _detect_platform(text)
+    hints = hints or {}
+
+    platform = (
+        detect_platform(text)
+        or getattr(profile, "platform", None)
+        or (hints.get("platform") or None)
+    )
     profile_db = getattr(profile, "database", None)
-    engine = PROFILE_DATABASE_NAMES.get(profile_db or "") or _detect_engine(text)
-    method = getattr(profile, "deploy_method", None)
+    engine = (
+        detect_engine(text)
+        or PROFILE_DATABASE_NAMES.get(profile_db or "")
+        or (hints.get("engine") or None)
+    )
+    method = getattr(profile, "deploy_method", None) or (hints.get("method") or None)
     slug = DATABASE_URL_SLUGS.get(engine or "", "")
 
     # لینک و فیلتر مسیر **اینجا** ساخته می‌شوند، نه با جای‌نگهدار داخل خود
     # مسیر. یک `{platform}` خالی، `/paas//how-tos/` می‌سازد که بعد از
     # مرتب‌سازی به یک آدرس ۴۰۴ تبدیل می‌شود — و لینک خراب در دمو، همان
     # امتیاز «ارائه منبع مناسب» را می‌گیرد.
+    # برچسب فهرست فرم توضیح داخل پرانتز دارد («Docker (هر چیز دیگر)») که در
+    # عنوان یک قدم و در کوئری جستجو فقط نویز است.
+    label = re.sub(r"\s*\(.*?\)", "", PLATFORMS.get(platform or "", "")).strip()
+
     return {
         "platform": platform or "",
-        "platform_label": PLATFORMS.get(platform or "", "") or "برنامه‌تان",
+        "platform_label": label or "برنامه‌تان",
         "platform_prefix": f"/paas/{platform}/" if platform else "/paas/",
         "deploy_prefix": (
             f"/paas/{platform}/how-tos/deploy-app/" if platform else "/paas/"
@@ -550,7 +597,26 @@ def build_context(profile, text: str = "") -> dict[str, str]:
         "engine_slug": slug,
         "db_prefix": f"/dbaas/{slug}/" if slug else "/dbaas/",
         "db_url": f"{DOCS}/dbaas/{slug}/" if slug else f"{DOCS}/dbaas/about/",
-        "method_label": DEPLOY_METHOD_LABELS.get(method or "", "روش دلخواه شما"),
+        # `method` ممکن است کلید فرم («cli») یا برچسب واریانت بازیابی
+        # («Liara CLI») باشد — هر دو پذیرفته می‌شوند.
+        "method_label": (
+            DEPLOY_METHOD_LABELS.get(method or "")
+            or method
+            or "روش دلخواه شما"
+        ),
+        # سیگنال‌های خام، برای ذخیره در FlowState و استفاده در نوبت‌های بعدی.
+        "_platform": platform or "",
+        "_engine": engine or "",
+        "_method": method or "",
+    }
+
+
+def hints_from(ctx: dict[str, str]) -> dict[str, str]:
+    """سیگنال‌های قابل‌حمل را از ctx بیرون می‌کشد تا در session بمانند."""
+    return {
+        key: ctx.get(f"_{key}", "")
+        for key in ("platform", "engine", "method")
+        if ctx.get(f"_{key}")
     }
 
 

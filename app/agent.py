@@ -226,7 +226,6 @@ def platform_deploy_route(
     حرفش شنیده نشده. مدل بازنویسی گاهی این را ابهام می‌بیند؛ اینجا جلویش
     گرفته می‌شود.
     """
-    from app.flows import _detect_platform
     from app.project import PLATFORMS
 
     current = f" {normalize(question)} "
@@ -237,11 +236,11 @@ def platform_deploy_route(
     if any(term in current for term in DATABASE_ENGINE_ALIASES_FLAT):
         return None
 
-    # پلتفرمی که در همین پیام آمده، بر پروفایل مقدم است — کاربر ممکن است
+    # پلتفرمی که در همین پیام آمده، بر حافظه مقدم است — کاربر ممکن است
     # درباره‌ی پروژه‌ی دومش بپرسد.
-    platform = _detect_platform(current)
+    platform = flows.detect_platform(current)
     if not platform and any(noun in current for noun in _APP_NOUNS):
-        platform = getattr(session.profile, "platform", None)
+        platform = known_platform(session)
     if not platform:
         return None
 
@@ -253,6 +252,79 @@ def platform_deploy_route(
         "paas",
         f"/paas/{platform}/",
     )
+
+
+def remember_platform(question: str, session: Session) -> str | None:
+    """
+    اگر کاربر در این پیام پلتفرمش را گفت، در session نگه‌دار.
+
+    پروفایل فرم اختیاری است و بیشتر کاربرها پرش نمی‌کنند؛ ولی تقریباً همه در
+    پیام اول می‌گویند با چه چیزی کار می‌کنند. بدون نگه‌داشتن این یک کلمه،
+    پیام سوم دوباره پاسخ عمومی می‌گیرد و کاربر حق دارد بگوید «یادش نمی‌ماند».
+    """
+    detected = flows.detect_platform(question)
+    if detected and detected != session.platform:
+        session.platform = detected
+        log.info("session %s learned platform=%s", session.id, detected)
+    return session.platform
+
+
+def known_platform(session: Session) -> str | None:
+    """
+    پلتفرم مؤثر: پروفایل فرم، بعد چیزی که در گفتگو گفته شده.
+
+    اگر هیچ‌کدام نبود، پیام‌های قبلی کاربر دوباره خوانده می‌شوند. این برای
+    گفتگوهایی لازم است که پیش از افزوده‌شدن ستون `platform` ساخته شده‌اند —
+    بدون آن، تاریخچه‌ی موجود همچنان «فراموش‌شده» می‌ماند.
+    """
+    explicit = getattr(session.profile, "platform", None) or session.platform
+    if explicit:
+        return explicit
+    evidence = conversation_evidence(session)
+    return flows.detect_platform(evidence) if evidence.strip() else None
+
+
+def conversation_evidence(session: Session, turns: int = 8) -> str:
+    """
+    پیام‌های اخیر کاربر.
+
+    تشخیص پلتفرم و موتور دیتابیس روی همین اجرا می‌شود، نه فقط روی پیام
+    آخر — چون پیام آخر ممکن است «قدم بعد» باشد و هیچ کلمه‌ی مفیدی نداشته باشد.
+    """
+    return " ".join(
+        turn["content"] for turn in session.turns[-turns:] if turn["role"] == "user"
+    )
+
+
+def flow_context(session: Session, question: str) -> dict[str, str]:
+    """
+    ctx قدم‌های فرآیند، با ترتیب اولویت روشن:
+
+        پیام فعلی → پروفایل فرم → آنچه فرآیند موقع شروع یاد گرفت
+                  → آنچه session می‌داند → بقیه‌ی گفتگو
+
+    پیام فعلی اول است چون تازه‌ترین حرف صریح کاربر است. بقیه آخر است چون
+    فقط حافظه است — ولی همان حافظه است که «قدم بعد» را از یک پیام بی‌محتوا
+    به یک قدم مربوط تبدیل می‌کند.
+    """
+    hints = dict(session.flow.hints) if session.flow else {}
+
+    platform = known_platform(session)
+    if platform:
+        hints.setdefault("platform", platform)
+    if session.variant:
+        hints.setdefault("method", session.variant)
+
+    evidence = conversation_evidence(session)
+    if evidence:
+        from_history = flows.detect_platform(evidence)
+        if from_history:
+            hints.setdefault("platform", from_history)
+        engine = flows.detect_engine(evidence)
+        if engine:
+            hints.setdefault("engine", engine)
+
+    return flows.build_context(session.profile, question, hints=hints)
 
 
 def usable_clarification(clarify: str | None, options: list[str]) -> bool:
@@ -488,6 +560,7 @@ async def answer_once(
     session = sessions.get(session_id) if session_id else Session(id="_stateless")
     tokens = 0
 
+    remember_platform(question, session)
     plan = await rewrite(question, session)
     tokens += plan["tokens"]
 
@@ -505,8 +578,13 @@ async def answer_once(
         )
 
     # راهنمای پلتفرم از سمت فراخواننده به کوئری اضافه می‌شود تا نسخه‌ی
-    # درست صفحه (django/flask/nodejs) بالا بیاید.
-    query = f"{plan['query']} {platform}" if platform else plan["query"]
+    # درست صفحه (django/flask/nodejs) بالا بیاید. اگر فراخواننده چیزی نداد،
+    # آنچه در همین گفتگو گفته شده جایش را می‌گیرد.
+    effective_platform = platform or known_platform(session)
+    query = (
+        f"{plan['query']} {effective_platform}" if effective_platform
+        else plan["query"]
+    )
     service = plan["service"] or session.service
 
     retriever = get_retriever()
@@ -730,7 +808,15 @@ async def flow_stream(
     counter: dict[str, int],
 ) -> AsyncIterator[str]:
     """یک نوبت از فرآیند: یک قدم، با متن بازیابی‌شده‌ی همان قدم."""
-    ctx = flows.build_context(session.profile, question)
+    # ctx از کل گفتگو ساخته می‌شود، نه فقط از پیام فعلی. پیام «قدم بعد» هیچ
+    # کلمه‌ای ندارد؛ اگر فقط به آن نگاه کنیم، قدم دوم پلتفرمی را که کاربر در
+    # پیام اول گفته بود از دست می‌دهد و راهنمای عمومی PHP و Go می‌دهد.
+    ctx = flow_context(session, question)
+    # سیگنال‌ها در خود فرآیند ذخیره می‌شوند تا حتی بعد از خارج شدن پیام اول
+    # از پنجره‌ی context هم باقی بمانند.
+    state.hints = {**state.hints, **flows.hints_from(ctx)}
+    if ctx.get("_platform"):
+        session.platform = ctx["_platform"]
     steps = flows.resolve(flow, ctx)
 
     # --- خروج ---
@@ -860,6 +946,10 @@ async def chat_stream(
     tokens_used = 0
 
     try:
+        # هر چیزی که کاربر درباره‌ی استکش می‌گوید، همان لحظه ثبت می‌شود —
+        # قبل از هر مسیریابی، تا همه‌ی مسیرها از آن بهره ببرند.
+        remember_platform(question, session)
+
         # --- ۰. فرآیند چندمرحله‌ای ---
         #
         # قبل از بازنویسی، چون «قدم بعد» سؤال نیست و نه بازنویسی لازم دارد
@@ -927,8 +1017,7 @@ async def chat_stream(
         active_steps: list[flows.ResolvedStep] = []
         if active_flow and session.flow:
             active_steps = flows.resolve(
-                active_flow, flows.build_context(session.profile, question)
-            )
+                active_flow, flow_context(session, question))
             yield sse("flow", FlowEvent(**flows.progress_payload(
                 active_flow, active_steps, session.flow, "advanced")))
 
@@ -937,12 +1026,14 @@ async def chat_stream(
                                     detail="جستجوی مستندات"))
         service = plan["service"] or session.service
         profile = session.profile
+        platform = known_platform(session)
 
-        # پلتفرم پروفایل به کوئری اضافه می‌شود تا نسخه‌ی درست صفحه بالا
-        # بیاید: کاربر جنگویی نباید مستندات nodejs بگیرد.
+        # پلتفرم به کوئری اضافه می‌شود تا نسخه‌ی درست صفحه بالا بیاید: کاربر
+        # جنگویی نباید مستندات nodejs بگیرد. منبع پلتفرم فقط پروفایل فرم
+        # نیست — چیزی که کاربر در گفتگو گفته هم همان‌قدر معتبر است.
         queries = [plan["query"]] if plan.get("canonical") else [question, plan["query"]]
-        if profile and profile.platform:
-            queries.append(f"{plan['query']} {profile.platform}")
+        if platform:
+            queries.append(f"{plan['query']} {platform}")
 
         variant = session.variant or (profile.variant_hint if profile else None)
         hits = get_retriever().search(
@@ -976,6 +1067,18 @@ async def chat_stream(
                 "their platform without asking, and do not ask questions the "
                 "profile already answers.\n\n"
                 + profile.as_context()
+            )
+        elif platform:
+            # بدون فرم پروفایل هم، چیزی که کاربر گفته باید بماند. همین چند
+            # خط تفاوت بین «یادش می‌ماند» و «هر بار از صفر» است.
+            from app.project import PLATFORMS
+
+            system += (
+                "\n\n## What this user already told you\n"
+                f"Their platform is **{PLATFORMS.get(platform, platform)}** "
+                f"(`{platform}`). They said so earlier in this conversation.\n"
+                "Answer for that platform. Do NOT ask which platform they use, "
+                "and do not list instructions for other platforms."
             )
 
         messages = [
