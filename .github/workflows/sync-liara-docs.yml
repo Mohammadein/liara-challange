@@ -8,6 +8,16 @@ on:
         required: false
         default: false
         type: boolean
+  push:
+    branches:
+      - master
+    paths:
+      - "app/**"
+      - "static/**"
+      - "Dockerfile"
+      - "requirements.txt"
+      - "liara.json"
+      - ".github/workflows/sync-liara-docs.yml"
   schedule:
     # Twice an hour, away from the busy start-of-hour window.
     - cron: "17,47 * * * *"
@@ -38,12 +48,15 @@ jobs:
         shell: bash
         run: echo "sha=$(git -C docs rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-      - name: Check whether this documentation was deployed
+      # A release is identified by both sides of the deployment: the current
+      # application commit and the documentation snapshot. Previously this key
+      # only included the docs, so application-only fixes were silently skipped.
+      - name: Check whether this release was deployed
         id: deployed
         uses: actions/cache@v6
         with:
           path: .sync-state
-          key: deployed-docs-${{ hashFiles('docs/src/pages/**/*.mdx') }}
+          key: deployed-release-${{ github.sha }}-${{ hashFiles('docs/src/pages/**/*.mdx') }}
 
       - name: Set up Python
         if: steps.deployed.outputs.cache-hit != 'true' || inputs.force == true
@@ -139,12 +152,13 @@ jobs:
             --platform docker \
             --port 8000 \
             --no-app-logs \
-            --message "sync docs ${{ steps.docs.outputs.sha }}"
+            --message "app ${{ github.sha }} / docs ${{ steps.docs.outputs.sha }}"
 
       # actions/cache saves this marker only after every previous step succeeds.
-      - name: Mark documentation revision as deployed
+      - name: Mark release as deployed
         if: steps.deployed.outputs.cache-hit != 'true' || inputs.force == true
         shell: bash
         run: |
           mkdir -p .sync-state
           echo "${{ steps.docs.outputs.sha }}" > .sync-state/docs-sha
+          echo "${{ github.sha }}" > .sync-state/app-sha

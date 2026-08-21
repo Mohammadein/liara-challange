@@ -5,11 +5,12 @@ import unittest
 from app.agent import (
     database_clarification,
     database_setup_route,
+    flow_decision,
     liara_cli_route,
     python_version_route,
     rewrite,
 )
-from app.flows import FLOWS, match_flow, start_prompt
+from app.flows import FLOWS, FlowState, match_flow, start_prompt
 from app.project import ProjectProfile
 from app.session import Session
 
@@ -145,6 +146,22 @@ class FlowRoutingTests(unittest.TestCase):
                 matched = match_flow(start_prompt(flow))
                 self.assertIsNotNone(matched)
                 self.assertEqual(matched.id, flow.id)
+
+    def test_explicit_start_replaces_a_persisted_different_flow(self) -> None:
+        session = Session(
+            id="test", flow=FlowState(id="deploy_app", step=0)
+        )
+
+        decision = flow_decision(
+            "قدم به قدم راهنمایی کن: عیب‌یابی استقرار ناموفق", session
+        )
+
+        self.assertIsNotNone(decision)
+        action, flow, state = decision
+        self.assertEqual(action, "start")
+        self.assertEqual(flow.id, "deploy_failure")
+        self.assertEqual(state.id, "deploy_failure")
+        self.assertEqual(state.step, 0)
 
 
 if __name__ == "__main__":

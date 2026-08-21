@@ -793,6 +793,14 @@ def flow_decision(
     state = session.flow
     flow = flows.flow_by_id(state.id) if state else None
 
+    # A full start prompt is an explicit request to begin (or restart) a
+    # procedure. It must take precedence over persisted session state; otherwise
+    # a user who asks for troubleshooting while an old deployment flow is still
+    # active keeps seeing that old flow until they manually exit it.
+    matched = flows.match_flow(question)
+    if matched:
+        return "start", matched, FlowState(id=matched.id)
+
     if state and flow:
         if flows.exit_intent(question):
             return "exit", flow, state
@@ -806,9 +814,6 @@ def flow_decision(
         # می‌ماند. پرت کردن کاربر از سؤالش به قدم بعدی، کمک نیست.
         return None
 
-    matched = flows.match_flow(question)
-    if matched:
-        return "start", matched, FlowState(id=matched.id)
     return None
 
 
