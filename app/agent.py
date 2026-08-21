@@ -37,10 +37,14 @@ from app.contracts import (
 from app.llm import LLMUnavailable, aclient
 from app.prompts import ANSWER_SYSTEM, REWRITE_SYSTEM, build_context
 from app.retrieval import Hit, Retriever
+from app.tools import TOOL_SPECS, ToolBox
 from app.session import Session, sessions
 from app.settings import settings
 
 log = logging.getLogger("app.agent")
+
+# سقف دورهای ابزار. هر دور یک تماس LLM است.
+MAX_TOOL_ROUNDS = 2
 
 _retriever: Retriever | None = None
 
@@ -223,6 +227,32 @@ async def answer_once(
     )
 
 
+def _tool_detail(name: str, raw_result: str) -> str:
+    """
+    خلاصه‌ی نتیجه‌ی ابزار برای نمایش در UI.
+
+    قابلیت Agentic که دیده نشود امتیاز نمی‌گیرد. داور باید روی صفحه ببیند
+    «بررسی روش‌های موجود — Liara CLI، Console، Github» نه یک اسپینر خالی.
+    """
+    try:
+        data = json.loads(raw_result)
+    except Exception:
+        return ""
+
+    if data.get("error"):
+        return "ناموفق"
+    if name == "list_variants":
+        variants = data.get("variants")
+        if variants:
+            return "، ".join(variants[:4])
+        if data.get("variant"):
+            return str(data["variant"])
+        return "بدون تفکیک"
+    if name == "diagnose_error":
+        return str(data.get("error_signature", ""))[:80]
+    return ""
+
+
 # ------------------------------------------------------------ حلقه اصلی
 
 async def chat_stream(question: str, session_id: str) -> AsyncIterator[str]:
@@ -278,28 +308,84 @@ async def chat_stream(question: str, session_id: str) -> AsyncIterator[str]:
                 f"# متن مستندات\n\n{context}\n\n# سؤال کاربر\n\n{question}"},
         ]
 
+        box = ToolBox(get_retriever(), k=settings.top_k)
+        box.collected = list(hits)
         answer = ""
-        stream = await aclient().chat.completions.create(
-            model=settings.model_answer,
-            messages=messages,
-            temperature=0.2,
-            max_tokens=900,
-            stream=True,
-            stream_options={"include_usage": True},
-        )
-        async for part in stream:
-            if part.usage:
-                tokens_used += part.usage.total_tokens
-            if not part.choices:
-                continue
-            delta = part.choices[0].delta.content
-            if delta:
-                answer += delta
-                yield sse("token", TokenEvent(t=delta))
+
+        # حلقه‌ی ابزار با سقف. هر دور یک تماس LLM است — بدون سقف، مدل
+        # می‌تواند بی‌پایان جستجو کند. در دور آخر ابزارها برداشته می‌شوند
+        # تا مدل مجبور شود پاسخ بدهد، نه اینکه باز هم ابزار بخواهد.
+        for round_no in range(MAX_TOOL_ROUNDS + 1):
+            last_round = round_no == MAX_TOOL_ROUNDS
+            stream = await aclient().chat.completions.create(
+                model=settings.model_answer,
+                messages=messages,
+                temperature=0.2,
+                max_tokens=900,
+                stream=True,
+                stream_options={"include_usage": True},
+                **({} if last_round else {"tools": TOOL_SPECS, "tool_choice": "auto"}),
+            )
+
+            calls: dict[int, dict] = {}
+            async for part in stream:
+                if part.usage:
+                    tokens_used += part.usage.total_tokens
+                if not part.choices:
+                    continue
+                delta = part.choices[0].delta
+
+                if delta.content:
+                    answer += delta.content
+                    yield sse("token", TokenEvent(t=delta.content))
+
+                # فراخوانی ابزار تکه‌تکه می‌آید و باید سرهم شود
+                for tc in (delta.tool_calls or []):
+                    slot = calls.setdefault(tc.index, {"id": "", "name": "", "args": ""})
+                    if tc.id:
+                        slot["id"] = tc.id
+                    if tc.function and tc.function.name:
+                        slot["name"] = tc.function.name
+                    if tc.function and tc.function.arguments:
+                        slot["args"] += tc.function.arguments
+
+            if not calls:
+                break
+
+            messages.append({
+                "role": "assistant",
+                "content": answer or None,
+                "tool_calls": [
+                    {"id": c["id"], "type": "function",
+                     "function": {"name": c["name"], "arguments": c["args"] or "{}"}}
+                    for c in calls.values()
+                ],
+            })
+
+            for c in calls.values():
+                try:
+                    args = json.loads(c["args"] or "{}")
+                except json.JSONDecodeError:
+                    args = {}
+
+                detail = args.get("topic") or args.get("variant") or ""
+                yield sse("tool", ToolEvent(name=c["name"], status="running",
+                                            detail=detail))
+                result = box.run(c["name"], args)
+                yield sse("tool", ToolEvent(
+                    name=c["name"], status="done",
+                    detail=_tool_detail(c["name"], result),
+                ))
+
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": c["id"],
+                    "content": result,
+                })
 
         # --- ۵. منابع ---
-        if hits:
-            yield sse("sources", SourcesEvent(items=_sources(hits)))
+        if box.collected:
+            yield sse("sources", SourcesEvent(items=_sources(box.collected)))
 
         session.add("user", question)
         session.add("assistant", answer)

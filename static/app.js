@@ -120,8 +120,10 @@ function addMessage(who, cls) {
 }
 
 const TOOL_LABELS = {
-  understand:  "درک سؤال",
-  search_docs: "جستجوی مستندات",
+  understand:     "درک سؤال",
+  search_docs:    "جستجوی مستندات",
+  list_variants:  "بررسی روش‌های موجود",
+  diagnose_error: "تحلیل خطا",
 };
 
 function renderTool(container, ev) {
