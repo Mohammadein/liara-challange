@@ -155,6 +155,20 @@ def main() -> None:
     checks.append((vague <= 1, f"قدم‌های بی‌جزئیات ({vague}) حداکثر ۱"))
     checks.append((links >= 3, f"لینک مستقیم در نقشه ({links}) حداقل ۳"))
 
+    # مدل نباید liara.json بنویسد — نسخه‌ی قطعی جدا برمی‌گردد و دوتایی
+    # با هم تناقض پیدا می‌کنند.
+    checks.append(('"platform"' not in plan["plan"]
+                   and '"pythonVersion"' not in plan["plan"],
+                   "نقشه liara.json موازی نمی‌سازد"))
+
+    # مقدار نمونه را به‌جای پیشنهاد کپی نکند. یک بار timezone را روی
+    # "Cuba" گذاشت — پیش‌فرض Asia/Tehran همان چیزی است که کاربر می‌خواهد.
+    bad_tz = [tz for tz in ("Cuba", "America/", "Europe/", "US/")
+              if tz in plan["plan"]]
+    checks.append((not bad_tz, f"منطقه زمانی جعلی پیشنهاد نمی‌دهد {bad_tz or ''}"))
+    checks.append(('"mirror": false' not in plan["plan"],
+                   "mirror را بی‌دلیل غیرفعال نمی‌کند"))
+
     # ---------- ۴. همان سؤال، بعد از پروفایل ----------
     print("\n" + "=" * 72)
     print(f"۴. همان سؤال — با پروفایل")

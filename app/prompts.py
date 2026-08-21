@@ -119,6 +119,14 @@ the exact field to fill if the excerpts contain one. No step should be \
   out; an advanced user wants commands and nothing else.
 - Do not repeat the service list back to them — it is shown separately in \
   the UI. Go straight to the steps.
+- Do NOT write a liara.json block. A correct one is generated separately \
+  and shown next to your plan; a second one written by you will contradict \
+  it. Refer to it as "فایل liara.json که پایین آماده شده" instead.
+- Never copy an example value as if it were a recommendation. The docs show \
+  `"timezone": "America/Los_Angeles"` to demonstrate the field — the default \
+  is Asia/Tehran and is what an Iranian user wants. Likewise `"mirror": \
+  false` is a fix for a specific failure, not a default. Only suggest \
+  changing a setting when the user's profile gives a reason to.
 - Aim for 5-9 steps. A 20-step plan does not get read.
 
 ## Warnings
