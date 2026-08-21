@@ -316,6 +316,7 @@ _TROUBLESHOOT = Flow(
     topics=(
         "خطا", "ارور", "error", "failed", "شکست", "بالا نمیاد",
         "کار نمی کند", "کار نمیکنه", "مشکل", "crash", "کرش", "بیلد",
+        "عیب یابی", "ناموفق", "استقرار ناموفق", "deploy failed",
     ),
     steps=(
         FlowStep(
@@ -475,6 +476,15 @@ def match_flow(text: str) -> Flow | None:
     normalized = f" {normalize(text)} "
     if not _has(normalized, _STEPWISE_MARKERS):
         return None
+
+    # چیپ شروع فرآیند، عنوان دقیق Flow را داخل پیام می‌گذارد. تطابق عنوان
+    # باید قبل از امتیازدهی موضوعی باشد؛ وگرنه عنوان «عیب‌یابی استقرار
+    # ناموفق» فقط به‌خاطر کلمه‌ی عمومی «استقرار» می‌تواند Flow استقرار از
+    # صفر را ببرد. normalize روی هر دو طرف نیم‌فاصله و حروف فارسی را یکسان
+    # می‌کند.
+    for flow in FLOWS.values():
+        if normalize(flow.title) in normalized:
+            return flow
 
     best: tuple[int, Flow] | None = None
     for flow in FLOWS.values():

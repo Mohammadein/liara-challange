@@ -9,6 +9,7 @@ from app.agent import (
     python_version_route,
     rewrite,
 )
+from app.flows import FLOWS, match_flow, start_prompt
 from app.project import ProjectProfile
 from app.session import Session
 
@@ -127,6 +128,23 @@ class CliFollowupRewriteTests(unittest.IsolatedAsyncioTestCase):
     async def test_generic_capabilities_without_cli_context_is_not_forced(self) -> None:
         session = Session(id="test")
         self.assertIsNone(liara_cli_route("چه امکاناتی داره؟", session))
+
+
+class FlowRoutingTests(unittest.TestCase):
+    def test_troubleshooting_title_beats_generic_deploy_topic(self) -> None:
+        matched = match_flow(
+            "قدم به قدم راهنمایی کن: عیب‌یابی استقرار ناموفق"
+        )
+
+        self.assertIsNotNone(matched)
+        self.assertEqual(matched.id, "deploy_failure")
+
+    def test_every_generated_start_prompt_round_trips_to_its_flow(self) -> None:
+        for flow in FLOWS.values():
+            with self.subTest(flow=flow.id):
+                matched = match_flow(start_prompt(flow))
+                self.assertIsNotNone(matched)
+                self.assertEqual(matched.id, flow.id)
 
 
 if __name__ == "__main__":
