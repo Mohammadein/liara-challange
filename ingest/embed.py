@@ -22,7 +22,7 @@ import sys
 import time
 
 import numpy as np
-from openai import OpenAI
+from openai import BadRequestError, OpenAI
 
 from app.settings import settings
 from ingest.config import CACHE_DIR, META_FILE, VECTORS_FILE
@@ -78,8 +78,22 @@ def _embed_batch(client: OpenAI, texts: list[str]) -> list[list[float]]:
     """با backoff نمایی تلاش مجدد می‌کند؛ خطای گذرای شبکه نباید کل ران را بسوزاند."""
     for attempt in range(MAX_RETRIES):
         try:
-            resp = client.embeddings.create(model=settings.model_embedding, input=texts)
+            # encoding_format صریح — بدون آن SDK با numpy نصب‌شده base64
+            # می‌فرستد و بعضی بک‌اندها ردش می‌کنند.
+            resp = client.embeddings.create(
+                model=settings.model_embedding, input=texts,
+                encoding_format="float",
+            )
             return [d.embedding for d in resp.data]
+        except BadRequestError:
+            # بعضی بک‌اندها (از جمله Gemini پشت گیت‌وی لیارا) ورودی دسته‌ای
+            # را قبول نمی‌کنند. نصف‌کردن، ران را نجات می‌دهد به‌جای اینکه
+            # وسط ۴۰۰۰ تکه بمیرد. تک‌تکی که شد، خطا واقعاً خطاست.
+            if len(texts) == 1:
+                raise
+            mid = len(texts) // 2
+            print(f"  دسته‌ی {len(texts)}تایی رد شد، نصف می‌کنم…")
+            return _embed_batch(client, texts[:mid]) + _embed_batch(client, texts[mid:])
         except Exception as exc:
             if attempt == MAX_RETRIES - 1:
                 raise
@@ -135,7 +149,8 @@ def embed_query(text: str) -> np.ndarray:
     """
     client = _client()
     resp = client.embeddings.create(
-        model=settings.model_embedding, input=[QUERY_PREFIX + text]
+        model=settings.model_embedding, input=[QUERY_PREFIX + text],
+        encoding_format="float",
     )
     v = np.array(resp.data[0].embedding, dtype=np.float32)
     return v / max(float(np.linalg.norm(v)), 1e-9)

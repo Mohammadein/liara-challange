@@ -15,6 +15,16 @@ from openai import OpenAI
 
 from app.settings import settings
 
+# از پیام خطای خود گیت‌وی درآمده؛ /v1/models همه‌شان را برنمی‌گرداند.
+EMBEDDING_CANDIDATES = [
+    "openai/text-embedding-3-small",
+    "openai/text-embedding-3-large",
+    "openai/text-embedding-ada-002",
+    "google/gemini-embedding-001",
+    "google/gemini-embedding-2",
+    "intfloat/multilingual-e5-large",
+]
+
 
 def main() -> None:
     print(f"base_url : {settings.liara_ai_base_url}")
@@ -32,6 +42,7 @@ def main() -> None:
 
     # --- مدل‌های در دسترس ---
     print("\n── مدل‌های در دسترس ──")
+    embed: list[str] = []
     try:
         models = sorted(m.id for m in client.models.list().data)
         print(f"مجموعاً {len(models)} مدل")
@@ -46,18 +57,37 @@ def main() -> None:
         print(f"لیست مدل‌ها در دسترس نیست ({type(exc).__name__}) — مهم نیست.")
 
     # --- تست امبدینگ ---
-    print(f"\n── تست امبدینگ: {settings.model_embedding} ──")
-    try:
-        r = client.embeddings.create(
-            model=settings.model_embedding,
-            input=["استقرار برنامه جنگو در لیارا"],
-        )
-        dim = len(r.data[0].embedding)
-        print(f"✓ کار می‌کند — ابعاد وکتور: {dim}")
-        print(f"  حجم تخمینی vectors.npy: {3341 * dim * 4 / 1024 / 1024:.0f} MB")
-    except Exception as exc:
-        print(f"❌ {type(exc).__name__}: {exc}")
-        print("   MODEL_EMBEDDING را در .env با یکی از مدل‌های بالا عوض کنید.")
+    #
+    # هر مدلی که در allowlist هست لزوماً واقعاً سرو نمی‌شود: گیت‌وی لیارا
+    # اسم را قبول می‌کند ولی بک‌اند ممکن است «Unsupported embedding model»
+    # بدهد. تنها راه مطمئن، تماس واقعی با تک‌تکشان است.
+    candidates = list(dict.fromkeys(
+        [settings.model_embedding, *EMBEDDING_CANDIDATES, *embed]
+    ))
+    print("\n── تست واقعی مدل‌های امبدینگ ──")
+    working: list[tuple[str, int]] = []
+    for name in candidates:
+        try:
+            # صریح float: SDK وقتی numpy نصب باشد پیش‌فرض base64 می‌فرستد و
+            # بک‌اند Google آن را رد می‌کند.
+            r = client.embeddings.create(
+                model=name, input=["استقرار برنامه جنگو در لیارا"],
+                encoding_format="float",
+            )
+            dim = len(r.data[0].embedding)
+            working.append((name, dim))
+            print(f"  ✓ {name}  →  dim={dim}")
+        except Exception as exc:
+            reason = getattr(getattr(exc, "response", None), "text", "") or str(exc)
+            print(f"  ❌ {name}  →  {type(exc).__name__}: {reason[:160]}")
+
+    if working:
+        print("\nقابل استفاده:")
+        for name, dim in working:
+            size_mb = 3995 * dim * 4 / 1024 / 1024
+            print(f"  MODEL_EMBEDDING={name}   (dim={dim}, vectors.npy ≈ {size_mb:.0f} MB)")
+    else:
+        print("\n❌ هیچ مدل امبدینگی کار نکرد — با پشتیبانی لیارا تماس بگیرید.")
 
     # --- تست چت ---
     print(f"\n── تست چت: {settings.model_answer} ──")

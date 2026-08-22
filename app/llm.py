@@ -107,9 +107,12 @@ def _embed_query_cached(text: str) -> tuple[float, ...]:
     خروجی tuple است تا قابل کش باشد؛ نرمال‌شده برمی‌گردد.
     """
     def call():
+        # encoding_format صریح: SDK با numpy نصب‌شده پیش‌فرض base64 می‌فرستد
+        # و بعضی بک‌اندها (مثل Google روی گیت‌وی لیارا) ردش می‌کنند.
         resp = client().embeddings.create(
             model=settings.model_embedding,
             input=[settings.embed_query_prefix + text],
+            encoding_format="float",
         )
         if resp.usage:
             metrics.token_usage("embedding", resp.usage.total_tokens)
