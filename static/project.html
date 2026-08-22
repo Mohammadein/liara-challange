@@ -4,100 +4,155 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>پروژه‌ی من — دستیار مستندات لیارا</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%232196f3'/><text x='16' y='23' font-size='19' text-anchor='middle' fill='white' font-family='sans-serif'>ل</text></svg>">
-<!--
-  نمونه‌ی مرجع فرم پروژه.
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'><defs><linearGradient id='g' x1='0' x2='1'><stop stop-color='%236fffe0'/><stop offset='1' stop-color='%232fc8ff'/></linearGradient></defs><rect width='40' height='40' rx='12' fill='%23171b1d'/><path d='M20 6 32 13v14L20 34 8 27V13Z' fill='none' stroke='url(%23g)' stroke-width='2.8'/><path d='M20 6 32 13 20 20 8 13 20 6Z' fill='url(%23g)' opacity='.9'/></svg>">
 
-  رضایی: فیلدها از /api/v1/project/options می‌آیند، نه از این فایل.
-  اگر پلتفرم جدیدی به لیارا اضافه شود، فقط app/project.py عوض می‌شود و
-  فرم خودکار به‌روز می‌شود. هر چیزی که اینجا hardcode کنی، روزی از سرور
-  جدا می‌افتد.
-
-  بدون CDN — هر کتابخانه‌ای لازم شد باید داخل static/ کپی شود.
--->
 <style>
-  :root {
-    --bg:#0f1115; --panel:#171a21; --panel-2:#1e222b; --border:#2a2f3a;
-    --text:#e6e8ec; --muted:#98a0ae; --accent:#2196f3; --ok:#3ddc84;
-  }
-  *{box-sizing:border-box}
-  body{
-    margin:0;background:var(--bg);color:var(--text);
-    font-family:system-ui,"Segoe UI",Tahoma,sans-serif;line-height:1.85;
-  }
-  .wrap{max-width:780px;margin:0 auto;padding:24px 16px 60px}
-  header{display:flex;align-items:baseline;gap:12px;margin-bottom:6px;flex-wrap:wrap}
-  h1{font-size:20px;margin:0}
-  header a{color:var(--accent);font-size:13px;text-decoration:none}
-  .lede{color:var(--muted);font-size:14px;margin:0 0 24px}
-  .field{margin-bottom:18px}
-  label{display:block;font-size:14px;font-weight:600;margin-bottom:6px}
-  .help{font-size:12px;color:var(--muted);margin-bottom:8px}
-  input,select,textarea{
-    width:100%;background:var(--panel);color:var(--text);
-    border:1px solid var(--border);border-radius:10px;padding:11px 13px;
-    font:inherit;font-size:14px;
-  }
-  textarea{resize:vertical;min-height:88px}
-  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent)}
-  .chips{display:flex;flex-wrap:wrap;gap:8px}
-  .chip{
-    display:flex;align-items:center;gap:8px;background:var(--panel);
-    border:1px solid var(--border);border-radius:999px;padding:7px 14px;
-    font-size:13px;cursor:pointer;user-select:none;
-  }
-  .chip.on{border-color:var(--accent);background:#16283c}
-  .chip input{display:none}
-  button{
-    background:var(--accent);color:#fff;border:0;border-radius:10px;
-    padding:12px 26px;font:inherit;font-size:15px;cursor:pointer;
-  }
-  button:disabled{opacity:.45;cursor:not-allowed}
-  #out{margin-top:32px}
-  .card{
-    background:var(--panel);border:1px solid var(--border);
-    border-radius:12px;padding:14px 16px;margin-bottom:10px;
-  }
-  .card h4{margin:0 0 4px;font-size:14px}
-  .card .why{color:var(--muted);font-size:13px}
-  .card a{color:var(--accent);font-size:12.5px;text-decoration:none}
-  h3{font-size:15px;margin:26px 0 12px;color:var(--muted);font-weight:600}
-  pre{
-    direction:ltr;text-align:left;background:#0b0d11;border:1px solid var(--border);
-    border-radius:10px;padding:12px 14px;overflow-x:auto;font-size:13px;
-  }
-  code{font-family:ui-monospace,Consolas,monospace}
-  :not(pre)>code{
-    direction:ltr;display:inline-block;background:var(--panel-2);
-    border:1px solid var(--border);border-radius:5px;padding:1px 6px;font-size:12.5px;
-  }
-  .plan{background:var(--panel);border:1px solid var(--border);
-        border-radius:12px;padding:18px 20px;white-space:pre-wrap}
-  .meta{font-size:12px;color:var(--muted);margin-top:12px}
-  .err{border-color:#7f2b2b;background:#2a1414;color:#ffb4b4}
-  .spin{color:var(--muted);font-size:14px}
-  .done{color:var(--ok)}
+@font-face{font-family:"Vazirmatn";src:url("https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/fonts/webfonts/Vazirmatn[wght].woff2") format("woff2 supports variations"),url("https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/fonts/webfonts/Vazirmatn[wght].woff2") format("woff2-variations");font-style:normal;font-weight:100 900;font-display:swap;}
+:root{
+ --bg:#111213;--panel:#181a1b;--panel-2:#1e2021;--border:rgba(255,255,255,.09);
+ --text:#f1f4f3;--muted:#8d9694;--accent:#5ee8d5;--accent-2:#36c7ee;
+ --ok:#62e6a8;--danger:#ff7777;
+}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text)}
+body{
+ font-family:"Vazirmatn",IRANSans,system-ui,"Segoe UI",Tahoma,sans-serif;line-height:1.85;
+ background:radial-gradient(circle at 50% -5%,rgba(94,232,213,.09),transparent 34%),var(--bg);
+}
+button,input,select,textarea{font:inherit}
+button{cursor:pointer}
+.wrap{width:min(920px,calc(100% - 32px));margin:0 auto;padding:26px 0 70px}
+.topbar{
+ display:flex;align-items:center;justify-content:space-between;gap:20px;
+ padding-bottom:18px;border-bottom:1px solid var(--border);margin-bottom:28px
+}
+.brand{display:flex;align-items:center;gap:10px}
+.logo{
+ width:38px;height:38px;border-radius:12px;display:grid;place-items:center;
+ background:linear-gradient(145deg,rgba(94,232,213,.14),rgba(54,199,238,.08));
+ border:1px solid rgba(94,232,213,.22);color:var(--accent)
+}
+.logo svg{width:22px}
+.brand strong{font-size:14px}.brand small{display:block;color:var(--muted);font-size:9px;margin-top:-3px}
+.back{
+ color:var(--muted);font-size:11px;text-decoration:none;padding:7px 11px;border-radius:9px;
+ border:1px solid var(--border);background:rgba(255,255,255,.02);transition:.18s
+}
+.back:hover{color:var(--text);border-color:rgba(94,232,213,.3);background:rgba(94,232,213,.06)}
+.hero{max-width:720px;margin:0 auto 28px;text-align:center}
+.eyebrow{
+ display:inline-flex;align-items:center;gap:7px;color:var(--accent);font-size:9px;
+ padding:5px 10px;border:1px solid rgba(94,232,213,.2);background:rgba(94,232,213,.06);
+ border-radius:999px;margin-bottom:12px
+}
+.eyebrow i{width:5px;height:5px;border-radius:50%;background:var(--accent)}
+h1{font-size:27px;letter-spacing:-.8px;margin:0 0 7px}
+.lede{color:var(--muted);font-size:12px;max-width:610px;margin:0 auto}
+.card-shell{
+ background:rgba(24,26,27,.82);border:1px solid var(--border);border-radius:18px;
+ padding:25px;box-shadow:0 25px 80px rgba(0,0,0,.22);backdrop-filter:blur(14px)
+}
+.field{margin-bottom:20px}
+label{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:650;margin-bottom:7px}
+label:before{content:"";width:5px;height:5px;border-radius:50%;background:var(--accent);opacity:.7}
+.help{font-size:10px;color:var(--muted);margin:-1px 0 8px 12px}
+input,select,textarea{
+ width:100%;background:#151718;color:var(--text);border:1px solid var(--border);
+ border-radius:11px;padding:11px 13px;font:inherit;font-size:12px;transition:.18s
+}
+input::placeholder,textarea::placeholder{color:#66706e}
+textarea{resize:vertical;min-height:94px}
+input:focus,select:focus,textarea:focus{outline:none;border-color:rgba(94,232,213,.48);box-shadow:0 0 0 3px rgba(94,232,213,.05)}
+select{appearance:none;background-image:linear-gradient(45deg,transparent 50%,#7d8885 50%),linear-gradient(135deg,#7d8885 50%,transparent 50%);background-position:calc(100% - 17px) 50%,calc(100% - 12px) 50%;background-size:5px 5px,5px 5px;background-repeat:no-repeat}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{
+ display:flex;align-items:center;gap:8px;background:#151718;border:1px solid var(--border);
+ border-radius:999px;padding:7px 13px;font-size:11px;cursor:pointer;user-select:none;transition:.18s
+}
+.chip:hover{border-color:rgba(94,232,213,.28)}
+.chip.on{border-color:rgba(94,232,213,.48);background:rgba(94,232,213,.08);color:#dcfaf5}
+.chip input{display:none}
+.actions{display:flex;align-items:center;justify-content:flex-start;gap:10px;margin-top:24px}
+button.primary{
+ background:linear-gradient(145deg,var(--accent),var(--accent-2));color:#0e1717;border:0;border-radius:11px;
+ padding:11px 22px;font-size:12px;font-weight:700;box-shadow:0 10px 28px rgba(54,199,238,.12);transition:.18s
+}
+button.primary:hover{transform:translateY(-1px);filter:brightness(1.05)}
+button:disabled{opacity:.45;cursor:not-allowed}
+.ripple{position:absolute;border-radius:999px;transform:scale(0);animation:ripple .55s ease-out;background:rgba(255,255,255,.14);pointer-events:none}
+@keyframes ripple{to{transform:scale(4);opacity:0}}
+.card,.card-shell{transition:border-color .2s ease,transform .2s ease,box-shadow .2s ease}
+.card:hover{transform:translateY(-1px);box-shadow:0 12px 35px rgba(0,0,0,.16)}
+
+#out{margin-top:28px}
+.section-title{font-size:11px;color:var(--muted);margin:25px 0 10px;font-weight:650;display:flex;align-items:center;gap:8px}
+.section-title:before{content:"";height:1px;flex:1;background:var(--border)}
+.service-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+.card{
+ background:rgba(255,255,255,.025);border:1px solid var(--border);border-radius:13px;padding:13px 14px;
+ margin-bottom:9px;transition:.18s
+}
+.card:hover{border-color:rgba(94,232,213,.2)}
+.card h4{margin:0 0 4px;font-size:12px}.card .why{color:var(--muted);font-size:10.5px}
+.card a{display:inline-flex;align-items:center;gap:4px;color:var(--accent);font-size:10px;text-decoration:none;margin-top:8px}
+.card a:hover{text-decoration:underline}
+pre{
+ direction:ltr;text-align:left;background:#0b0c0d;border:1px solid var(--border);
+ border-radius:11px;padding:13px 14px;overflow-x:auto;font-size:11px
+}
+code{font-family:"Cascadia Code",Consolas,monospace}
+:not(pre)>code{direction:ltr;display:inline-block;background:var(--panel-2);border:1px solid var(--border);border-radius:6px;padding:1px 6px;font-size:11px}
+.plan{background:rgba(255,255,255,.025);border:1px solid var(--border);border-radius:13px;padding:17px 18px;white-space:pre-wrap;font-size:11.5px}
+.meta{font-size:9px;color:var(--muted);margin-top:12px}.done{color:var(--ok)}.err{border-color:#713131;background:#2a1616;color:#ffb5b5}
+.spin{color:var(--muted);font-size:11px}
+#fields.spin{padding:18px;border:1px dashed var(--border);border-radius:12px;text-align:center}
+@media(max-width:700px){
+ .wrap{width:min(100% - 20px,920px);padding-top:14px}.topbar{margin-bottom:20px}
+ .card-shell{padding:17px}.service-grid{grid-template-columns:1fr}h1{font-size:23px}
+ .back{font-size:10px}.lede{font-size:11px}
+}
 </style>
 </head>
 <body>
 <div class="wrap">
+  <div class="topbar">
+    <div class="brand">
+      <div class="logo">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M12 3 20 7.7v8.6L12 21l-8-4.7V7.7L12 3Z" stroke="currentColor" stroke-width="1.6"/><path d="m12 3 8 4.7-8 4.7-8-4.7L12 3Z" fill="currentColor" opacity=".7"/><path d="M12 12.4V21" stroke="currentColor" stroke-width="1.5"/></svg>
+      </div>
+      <div><strong>دستیار لیارا</strong><small>ساخت هوشمند نقشه پروژه</small></div>
+    </div>
+    <a class="back" href="/">← بازگشت به چت</a>
+  </div>
 
-<header>
-  <h1>پروژه‌ی من</h1>
-  <a href="/">← برگرد به چت</a>
-</header>
-<p class="lede">
-  بگو چه می‌خواهی بسازی تا بگویم روی لیارا به چه سرویس‌هایی نیاز داری و از
-  کجا شروع کنی. بعد از این، پاسخ‌های چت هم مخصوص پروژه‌ی خودت می‌شود.
-</p>
+  <section class="hero">
+    <div class="eyebrow"><i></i> PROJECT ARCHITECT</div>
+    <h1>پروژه‌ات را هوشمندانه شروع کن</h1>
+    <p class="lede">چند مشخصه از پروژه را بگو تا سرویس‌های مناسب، مسیر شروع و تنظیمات پیشنهادی لیارا را برایت آماده کنیم.</p>
+  </section>
 
-<form id="f"><div id="fields" class="spin">در حال بارگذاری فرم…</div></form>
+  <div class="card-shell">
+    <form id="f"><div id="fields" class="spin">در حال بارگذاری فرم…</div></form>
+  </div>
 
-<div id="out"></div>
-
+  <div id="out"></div>
 </div>
 
 <script>
+document.addEventListener("click", e => {
+  const target = e.target.closest("button");
+  if (!target || target.disabled) return;
+  if (getComputedStyle(target).position === "static") target.style.position = "relative";
+  target.style.overflow = "hidden";
+  const r = document.createElement("span");
+  r.className = "ripple";
+  const rect = target.getBoundingClientRect(), size = Math.max(rect.width, rect.height);
+  r.style.width = r.style.height = size + "px";
+  r.style.left = (e.clientX - rect.left - size/2) + "px";
+  r.style.top = (e.clientY - rect.top - size/2) + "px";
+  target.appendChild(r); setTimeout(() => r.remove(), 600);
+}, true);
+
 const SESSION_ID = localStorage.getItem("liara_session")
   || (localStorage.setItem("liara_session", crypto.randomUUID()),
       localStorage.getItem("liara_session"));
@@ -111,7 +166,6 @@ function esc(s){
     ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 }
 
-/* فرم از سرور ساخته می‌شود — هیچ فیلدی اینجا hardcode نیست */
 fetch("/api/v1/project/options")
   .then(r => r.json())
   .then(data => {
@@ -141,9 +195,8 @@ fetch("/api/v1/project/options")
                 <label>${esc(f.label)}${f.required ? " *" : ""}</label>
                 ${help}${control}
               </div>`;
-    }).join("") + `<button type="submit" id="go">بساز نقشه‌ام را</button>`;
+    }).join("") + `<div class="actions"><button class="primary" type="submit" id="go">بساز نقشه‌ام را <span aria-hidden="true">↗</span></button></div>`;
 
-    // تیک‌ها را دیداری کن
     fieldsEl.addEventListener("change", e => {
       if (e.target.type === "checkbox")
         e.target.closest(".chip").classList.toggle("on", e.target.checked);
@@ -162,13 +215,13 @@ formEl.addEventListener("submit", async e => {
 
   const fd = new FormData(formEl);
   const body = {
-    session_id:    SESSION_ID,
-    description:   fd.get("description") || "",
-    platform:      fd.get("platform") || null,
-    database:      fd.get("database") || null,
+    session_id: SESSION_ID,
+    description: fd.get("description") || "",
+    platform: fd.get("platform") || null,
+    database: fd.get("database") || null,
     deploy_method: fd.get("deploy_method") || null,
-    experience:    fd.get("experience") || "intermediate",
-    needs:         fd.getAll("needs"),
+    experience: fd.get("experience") || "intermediate",
+    needs: fd.getAll("needs"),
   };
 
   try {
@@ -200,20 +253,18 @@ function render(d){
        ${esc(s.title)}${s.section ? " › " + esc(s.section) : ""}</a></div>`).join("");
 
   outEl.innerHTML = `
-    <h3>سرویس‌هایی که لازم داری</h3>${services}
-    <h3>از کجا شروع کن</h3>
+    <div class="section-title">سرویس‌هایی که لازم داری</div>
+    <div class="service-grid">${services}</div>
+    <div class="section-title">از کجا شروع کن</div>
     <div class="plan">${renderMd(d.plan)}</div>
-    <h3>فایل liara.json</h3>
+    <div class="section-title">فایل liara.json</div>
     <pre><code>${esc(JSON.stringify(d.liara_json, null, 2))}</code></pre>
-    ${sources ? `<h3>منابع</h3>${sources}` : ""}
-    <p class="meta done">
-      ✓ پروفایل ذخیره شد — از این به بعد پاسخ‌های چت مخصوص همین پروژه است.
-      <br>${d.usage.tokens} توکن · ${d.usage.latency_ms} میلی‌ثانیه
-    </p>`;
+    ${sources ? `<div class="section-title">منابع</div>${sources}` : ""}
+    <p class="meta done">✓ پروفایل ذخیره شد — از این به بعد پاسخ‌های چت مخصوص همین پروژه است.
+      <br>${d.usage.tokens} توکن · ${d.usage.latency_ms} میلی‌ثانیه</p>`;
   outEl.scrollIntoView({behavior:"smooth", block:"start"});
 }
 
-/* رندر حداقلی مارک‌داون — همان منطق app.js */
 function renderMd(text){
   const blocks = [];
   let out = text.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
