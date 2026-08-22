@@ -1,0 +1,7 @@
+{
+  "model": "google/gemini-embedding-001",
+  "dim": 3072,
+  "count": 3991,
+  "doc_prefix": "",
+  "query_prefix": ""
+}
