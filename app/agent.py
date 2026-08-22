@@ -387,7 +387,10 @@ def index_ready() -> bool:
     try:
         get_retriever()
         return True
-    except Exception:
+    except Exception as exc:
+        # بدون این خط، دلیل خرابی ایندکس در startup گم می‌شود و فقط
+        # «index failed to load» می‌ماند که هیچ‌چیز نمی‌گوید.
+        log.error("بارگذاری ایندکس شکست خورد: %s", exc)
         return False
 
 

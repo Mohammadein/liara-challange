@@ -127,11 +127,15 @@ class Retriever:
                 meta = {}
             built_with = meta.get("model")
             if built_with and built_with != settings.model_embedding:
-                log.error(
-                    "ایندکس با مدل %s ساخته شده ولی MODEL_EMBEDDING الان %s است. "
-                    "بازیابی بی‌معنی خواهد بود — python -m ingest.run_all را "
-                    "با همین مدل دوباره اجرا کنید.",
-                    built_with, settings.model_embedding,
+                # هشدار کافی نیست: یا ابعاد فرق دارد و هر درخواست با
+                # ValueError مبهم می‌ترکد، یا ابعاد یکی است و نتایج بی‌صدا
+                # آشغال می‌شوند. هر دو بدتر از بالا نیامدن‌اند.
+                raise RuntimeError(
+                    f"ایندکس با مدل {built_with} ساخته شده ولی MODEL_EMBEDDING "
+                    f"الان {settings.model_embedding} است. یا متغیر محیطی را "
+                    f"به {built_with} برگردانید، یا python -m ingest.run_all "
+                    f"را با {settings.model_embedding} اجرا کنید و data/ جدید "
+                    f"را deploy کنید."
                 )
             if meta.get("dim") and int(meta["dim"]) != int(vectors.shape[1]):
                 raise RuntimeError(
