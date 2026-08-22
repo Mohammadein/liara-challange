@@ -114,7 +114,7 @@ header{
   background:rgba(17,18,19,.72);backdrop-filter:blur(18px);z-index:10;transition:transform .24s ease,opacity .2s ease,visibility .2s ease;
 }
 header.is-hidden{transform:translateY(calc(-100% - 8px));opacity:0;visibility:hidden;pointer-events:none}
-#menu{display:none}
+#menu{display:inline-grid}
 .header-title{min-width:0;display:flex;align-items:center;gap:10px}
 .header-title h1{
   font-size:13px;margin:0;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
@@ -189,8 +189,7 @@ code{font-family:"Cascadia Code","SFMono-Regular",Consolas,monospace}
 .sources-toggle:hover{color:var(--text);border-color:rgba(94,232,213,.28);background:var(--accent-soft)}
 .sources-toggle svg{width:13px;transition:transform .18s}
 .sources.expanded .sources-toggle svg{transform:rotate(180deg)}
-.sources.collapsed .src:nth-of-type(n+2){display:none}
-.sources.expanded .src{display:flex}
+.sources .src{display:flex}
 
 .flow:empty,.suggestions:empty{display:none}
 .flow{
@@ -259,12 +258,13 @@ textarea::-webkit-scrollbar-thumb:hover{background:rgba(94,232,213,.62)}
 @media(max-width:720px){
   .sidebar{position:fixed;inset:0 0 0 auto;width:min(88vw,310px);transform:translateX(105%);transition:transform .24s ease;box-shadow:-25px 0 70px rgba(0,0,0,.45)}
   body.sidebar-open .sidebar{transform:translateX(0)}
+  .right-rail{position:fixed;inset:0 auto 0 0;width:min(88vw,310px);transform:translateX(-105%);transition:transform .24s ease;box-shadow:25px 0 70px rgba(0,0,0,.45)}
+  body.right-panel-open .right-rail{transform:translateX(0)}
   .scrim{position:fixed;inset:0;background:rgba(0,0,0,.58);z-index:20}
-  body.sidebar-open .scrim{display:block}
+  body.sidebar-open .scrim,body.right-panel-open .scrim{display:block}
   #menu{display:inline-grid}
   header{padding:9px 11px}.header-icon{display:none}
-  #log{padding-top:72px}
-  #log{padding:20px 11px}.log-inner{max-width:100%}
+  #log{padding:72px 11px 20px}.log-inner{max-width:100%}
   footer{padding-inline:10px}.composer{border-radius:14px}
   .composer-tools{display:none}.empty{margin-top:9vh}.empty h2{font-size:21px}
 }
@@ -381,11 +381,11 @@ body:after{width:230px;height:230px;left:8%;bottom:4%;background:rgba(54,199,238
 .file-preview{display:flex;align-items:center;gap:8px;margin-top:8px;padding:8px;border:1px solid var(--border);border-radius:9px;font-size:9px}
 .voice-panel{display:none;align-items:center;gap:8px;padding:7px 10px;background:#171a1a;border:1px solid var(--border);border-radius:10px;margin-bottom:7px}
 .voice-panel.active{display:flex}
+#voice-stop{display:none}
 .wave{display:flex;align-items:center;gap:2px;height:20px;flex:1}
 .wave i{display:block;width:2px;border-radius:2px;background:var(--accent);animation:wave .8s ease-in-out infinite}
 .wave i:nth-child(2n){animation-delay:.12s}.wave i:nth-child(3n){animation-delay:.22s}
 @keyframes wave{50%{height:16px;opacity:.45}}
-@media(max-width:1120px){.right-rail{display:none}}
 @media(max-width:720px){
       .main{min-width:0}
       .messages{padding-bottom:120px}
@@ -393,7 +393,7 @@ body:after{width:230px;height:230px;left:8%;bottom:4%;background:rgba(54,199,238
       .scroll-bottom{bottom:78px;left:auto;right:14px;transform:translateY(12px) scale(.85)}
       .scroll-bottom.show{transform:translateY(0) scale(1)}
       .bubble{max-width:min(92%,680px)}
-      header{padding-inline:12px}
+      header{padding-inline:16px}
     }
 
 
@@ -421,18 +421,76 @@ body.right-panel-collapsed .right-rail{width:0;flex-basis:0;padding-left:0;paddi
   transition:opacity .16s ease,transform .16s ease; z-index:60;
 }
 .panel-toggle:hover::after{opacity:1;transform:translate(50%,0) scale(1)}
-@media(max-width:1120px){
-  .right-rail{display:flex;position:fixed;inset:0 0 0 auto;width:min(88vw,310px);flex-basis:auto;transform:translateX(105%);z-index:31;box-shadow:-25px 0 70px rgba(0,0,0,.45)}
-  body.right-panel-open .right-rail{transform:translateX(0);opacity:1;pointer-events:auto}
-  body.right-panel-collapsed .right-rail{width:min(88vw,310px);flex-basis:auto;transform:translateX(105%);opacity:1;padding:16px 14px;pointer-events:none}
-  #right-toggle{display:inline-grid}
-}
-@media(min-width:1121px){#right-toggle{display:inline-grid}}
 @media(max-width:720px){
   #menu{display:inline-grid}
-  #right-toggle{display:inline-grid}
   body.left-panel-collapsed .sidebar{transform:translateX(105%);width:min(88vw,310px);flex-basis:auto;padding:16px;opacity:1;border-left:1px solid var(--border);pointer-events:none}
   body.sidebar-open .sidebar{transform:translateX(0);pointer-events:auto}
+  body.right-panel-collapsed .right-rail{transform:translateX(-105%);width:min(88vw,310px);flex-basis:auto;padding:16px 14px;opacity:1;pointer-events:none}
+  body.right-panel-open .right-rail{transform:translateX(0);pointer-events:auto}
+}
+
+
+/* ===== Final panel polish ===== */
+#menu.panel-toggle::after{
+  right:0;
+  transform:translate(0,-3px) scale(.98);
+}
+#menu.panel-toggle:hover::after{
+  transform:translate(0,0) scale(1);
+}
+@media(max-width:720px){
+  #menu.panel-toggle::after{
+    right:50%;
+    transform:translate(50%,-3px) scale(.98);
+  }
+  #menu.panel-toggle:hover::after{
+    transform:translate(50%,0) scale(1);
+  }
+}
+/* right-toggle sits at the physical left edge of the header (RTL layout), so its
+   tooltip is anchored to the left instead of centered, keeping it on-screen even
+   when the panel is closed and the button sits right at the viewport edge. */
+#right-toggle.panel-toggle::after{
+  left:0; right:auto;
+  transform:translate(0,-3px) scale(.98);
+}
+#right-toggle.panel-toggle:hover::after{
+  transform:translate(0,0) scale(1);
+}
+
+/* جستجو با همان تم و رنگ‌های اصلی صفحه */
+.drawer{
+  background:rgba(7,10,11,.68);
+  backdrop-filter:blur(8px);
+}
+.drawer-panel{
+  background:
+    radial-gradient(circle at 18% 8%,rgba(94,232,213,.055),transparent 28%),
+    radial-gradient(circle at 85% 90%,rgba(54,199,238,.045),transparent 30%),
+    linear-gradient(180deg,rgba(23,25,26,.985),rgba(13,15,16,.985));
+  border-left:1px solid rgba(94,232,213,.12);
+  box-shadow:-30px 0 90px rgba(0,0,0,.52);
+}
+.drawer-head{
+  padding-bottom:13px;
+  border-bottom:1px solid var(--border);
+}
+.drawer-head strong{color:var(--text)}
+.drawer .icon-btn:hover{
+  color:var(--accent);
+  border-color:rgba(94,232,213,.22);
+  background:var(--accent-soft);
+}
+.search-box{
+  background:rgba(255,255,255,.025);
+  border-color:rgba(255,255,255,.09);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.015);
+}
+.search-box input::placeholder{color:#66706e}
+#search-results{
+  background:rgba(255,255,255,.022);
+  border-color:var(--border);
+  color:var(--muted);
 }
 
 </style>
@@ -468,7 +526,7 @@ body.right-panel-collapsed .right-rail{width:0;flex-basis:0;padding-left:0;paddi
 
   <main class="main">
     <header>
-      <button class="icon-btn panel-toggle" id="menu" aria-label="باز و بسته کردن تاریخچه" title="تاریخچه گفتگوها" data-tooltip="تاریخچه گفتگوها">
+      <button class="icon-btn panel-toggle" id="menu" aria-label="باز و بسته کردن پنل گفتگوها" data-tooltip="پنل گفتگوها">
         <svg viewBox="0 0 24 24" fill="none"><path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
       </button>
       <div class="header-title">
@@ -481,7 +539,7 @@ body.right-panel-collapsed .right-rail{width:0;flex-basis:0;padding-left:0;paddi
       <button class="icon-btn header-search" id="open-search" aria-label="جستجو" data-tooltip="جستجو در گفتگو">
         <svg viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="6.5" stroke="currentColor" stroke-width="1.7"/><path d="m16 16 4 4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
       </button>
-      <button class="icon-btn panel-toggle" id="right-toggle" aria-label="باز و بسته کردن پنل کناری" title="پنل اطلاعات و پیشنهادها" data-tooltip="پنل اطلاعات و پیشنهادها">
+      <button class="icon-btn panel-toggle" id="right-toggle" aria-label="باز و بسته کردن پنل اطلاعات" data-tooltip="پنل اطلاعات">
         <svg viewBox="0 0 24 24" fill="none"><path d="M8 5h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H8" stroke="currentColor" stroke-width="1.6"/><path d="m13 9-3 3 3 3M10 12h9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
     </header>
@@ -523,7 +581,7 @@ body.right-panel-collapsed .right-rail{width:0;flex-basis:0;padding-left:0;paddi
     </button>
   </main>
 
-  <aside class="right-rail" aria-label="اطلاعات و پیشنهادهای گفتگو">
+  <aside class="right-rail" aria-label="اطلاعات و پیشنهادهای گفتگو" style="z-index: 1000;">
     <div class="rail-title">اطلاعات گفتگو</div>
     <div class="rail-card">
       <h3>وضعیت اتصال</h3>
@@ -621,26 +679,53 @@ body.right-panel-collapsed .right-rail{width:0;flex-basis:0;padding-left:0;paddi
 
   function decorateSources() {
     messages.querySelectorAll(".sources").forEach(box => {
-      const links = [...box.querySelectorAll(":scope > .src")];
-      if (links.length <= 1) {
-        box.classList.remove("collapsed","expanded");
+      // همیشه لیست فعلی منابع را از DOM می‌خوانیم (نه یک اسنپ‌شات قدیمی)،
+      // چون ممکن است منابع بعداً (مثلاً حین استریم پاسخ) به‌صورت پلکانی اضافه شوند.
+      const getLinks = () => [...box.querySelectorAll(".src")];
+
+      if (getLinks().length <= 1) {
+        getLinks().forEach(link => link.style.removeProperty("display"));
         box.querySelector(".sources-toggle")?.remove();
+        delete box.dataset.expanded;
         return;
       }
-      box.classList.add("collapsed");
+
+      const initialVisible = 1;
+      // این تابع هر بار که صدا زده می‌شود، خودش دوباره منابع را از DOM می‌خواند؛
+      // بنابراین حتی اگر رویداد کلیک روی یک نسخه‌ی قدیمی از این تابع بسته شده باشد،
+      // باز هم روی آخرین وضعیت واقعی منابع کار می‌کند و همه‌ی موارد لود شده
+      // (فقط تعداد نمایش داده‌شده، نه تعداد لود شده) را درست کنترل می‌کند.
+      const applyVisibility = () => {
+        const links = getLinks();
+        const expanded = box.dataset.expanded === "true";
+        links.forEach((link, index) => {
+          link.style.display = expanded || index < initialVisible ? "flex" : "none";
+        });
+
+        const label = box.querySelector(".sources-toggle-label");
+        const icon = box.querySelector(".sources-toggle svg");
+        if (label) label.textContent = expanded ? "نمایش کمتر" : "نمایش بیشتر";
+        if (icon) icon.style.transform = expanded ? "rotate(180deg)" : "rotate(0deg)";
+      };
+
       let toggle = box.querySelector(".sources-toggle");
       if (!toggle) {
         toggle = document.createElement("button");
         toggle.type = "button";
         toggle.className = "sources-toggle";
-        toggle.innerHTML = '<span class="sources-toggle-label">نمایش بیشتر</span><svg viewBox="0 0 24 24" fill="none"><path d="m6 9 6 6 6-6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+        toggle.innerHTML = '<span class="sources-toggle-label"></span><svg viewBox="0 0 24 24" fill="none"><path d="m6 9 6 6 6-6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>';
         box.appendChild(toggle);
-        toggle.addEventListener("click", () => {
-          const expanded = box.classList.toggle("expanded");
-          box.classList.toggle("collapsed", !expanded);
-          toggle.querySelector(".sources-toggle-label").textContent = expanded ? "نمایش کمتر" : "نمایش بیشتر";
+        toggle.addEventListener("click", e => {
+          e.preventDefault();
+          e.stopPropagation();
+          box.dataset.expanded = box.dataset.expanded !== "true" ? "true" : "false";
+          applyVisibility();
         });
       }
+
+      box.appendChild(toggle); // اگر منابع جدید بعداً اضافه شوند، دکمه همیشه در انتها بماند
+      if (!box.dataset.expanded) box.dataset.expanded = "false";
+      applyVisibility();
     });
   }
 
@@ -670,7 +755,7 @@ body.right-panel-collapsed .right-rail{width:0;flex-basis:0;padding-left:0;paddi
     const leftOpen = innerWidth <= 720
       ? document.body.classList.contains("sidebar-open")
       : !document.body.classList.contains("left-panel-collapsed");
-    const rightOpen = innerWidth <= 1120
+    const rightOpen = innerWidth <= 720
       ? document.body.classList.contains("right-panel-open")
       : !document.body.classList.contains("right-panel-collapsed");
     menuBtn?.classList.toggle("is-active", leftOpen);
@@ -684,7 +769,7 @@ body.right-panel-collapsed .right-rail{width:0;flex-basis:0;padding-left:0;paddi
     syncPanelButtons();
   });
   rightBtn?.addEventListener("click", () => {
-    if (innerWidth <= 1120) document.body.classList.toggle("right-panel-open");
+    if (innerWidth <= 720) document.body.classList.toggle("right-panel-open");
     else document.body.classList.toggle("right-panel-collapsed");
     syncPanelButtons();
   });
@@ -702,7 +787,7 @@ body.right-panel-collapsed .right-rail{width:0;flex-basis:0;padding-left:0;paddi
       syncPanelButtons();
     }
   });
-  if (innerWidth > 1120) document.body.classList.remove("right-panel-collapsed");
+  if (innerWidth > 720) document.body.classList.remove("right-panel-collapsed");
   syncPanelButtons();
 
   // Header is an overlay, so hiding it removes it visually without leaving a blank gap.
