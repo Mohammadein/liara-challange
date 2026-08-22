@@ -10,6 +10,17 @@ const newChatEl  = document.getElementById("new-chat");
 
 const CLIENT_KEY = "liara_client_id";
 const SESSION_KEY = "liara_active_session";
+
+/*
+ * راه فرار: اگر رندر یک پاسخ ذخیره‌شده مرورگر را قفل کند، هر بار که صفحه
+ * باز شود همان سشن دوباره بازیابی و دوباره قفل می‌شود — و چون main thread
+ * بسته است، حتی رفرش هم اجرا نمی‌شود. با ?reset=1 بدون بازیابی بالا می‌آید.
+ * این چند خط باید قبل از هر خواندن localStorage اجرا شود.
+ */
+if (new URLSearchParams(location.search).has("reset")) {
+  try { localStorage.removeItem(SESSION_KEY); } catch (_) {}
+  history.replaceState(null, "", location.pathname);
+}
 const CLIENT_ID = localStorage.getItem(CLIENT_KEY) || crypto.randomUUID();
 localStorage.setItem(CLIENT_KEY, CLIENT_ID);
 
@@ -523,6 +534,41 @@ newChatEl.addEventListener("click", () => {
 });
 document.getElementById("menu").addEventListener("click", openSidebar);
 document.getElementById("scrim").addEventListener("click", closeSidebar);
+
+/*
+ * تور ایمنی. یک استثنای گرفته‌نشده در وسط رندر، `busy` را روی true قفل
+ * می‌کند و از آن لحظه هر دکمه بی‌صدا کار نمی‌کند — کاربر می‌گوید «صفحه
+ * فریز کرد» و هیچ ردی هم در لاگ سرور نیست. اینجا هم قفل را باز می‌کنیم و
+ * هم خطا را روی صفحه نشان می‌دهیم تا قابل گزارش باشد.
+ */
+function recover(label, detail) {
+  console.error(label, detail);
+  busy = false;
+  sendEl.disabled = false;
+  try { syncNewChatButton(); } catch (_) {}
+  const bar = document.getElementById("js-error") || (() => {
+    const el = document.createElement("div");
+    el.id = "js-error";
+    el.style.cssText =
+      "position:fixed;inset-inline:0;bottom:0;z-index:9999;padding:8px 12px;" +
+      "background:#7f1d1d;color:#fff;font:12px/1.6 monospace;direction:ltr;" +
+      "text-align:left;white-space:pre-wrap;max-height:40vh;overflow:auto";
+    document.body.appendChild(el);
+    return el;
+  })();
+  bar.textContent = label + ": " + detail;
+}
+
+window.addEventListener("error", event => {
+  recover("JS error", (event.message || "") + " @ " +
+    (event.filename || "") + ":" + (event.lineno || "?"));
+});
+
+window.addEventListener("unhandledrejection", event => {
+  const reason = event.reason;
+  recover("Unhandled rejection",
+    (reason && (reason.stack || reason.message)) || String(reason));
+});
 
 async function start() {
   try {
