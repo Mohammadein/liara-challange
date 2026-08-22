@@ -84,7 +84,12 @@ def _retry(fn, what: str):
                 time.sleep(wait)
         except Exception as exc:
             # 4xxهایی مثل کلید اشتباه یا ورودی بد با retry درست نمی‌شوند.
-            log.error("%s failed permanently (%s)", what, type(exc).__name__)
+            # پیام provider هم لاگ می‌شود وگرنه «۴۰۰ Bad Request» بدون علت
+            # می‌ماند؛ Secretها را SecretRedactionFilter پاک می‌کند.
+            log.error(
+                "%s failed permanently (%s): %s",
+                what, type(exc).__name__, str(exc)[:300],
+            )
             raise LLMUnavailable(f"{what} ناموفق بود.") from exc
     log.error("%s failed after %d attempts: %s", what, MAX_RETRIES, last)
     raise LLMUnavailable(f"{what} ناموفق بود.") from last

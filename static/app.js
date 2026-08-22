@@ -193,44 +193,70 @@ function clearMessages(showWelcome = true) {
 
 /* ------------------------------------------------------------ SSE */
 
+// اگر سمت سرور استریم نیمه‌کاره بماند و کانکشن بسته نشود، `reader.read()`
+// تا ابد منتظر می‌ماند، `busy` روی true قفل می‌شود و کل UI مرده به نظر
+// می‌رسد. نگهبان زمانی، بی‌صدا ماندن سرور را به یک خطای قابل نمایش تبدیل
+// می‌کند. تایمر با هر بایت دریافتی ریست می‌شود، پس پاسخ طولانی قطع نمی‌شود.
+const STREAM_IDLE_TIMEOUT_MS = 90_000;
+
 async function* streamChat(message, signal) {
-  const res = await fetch("/api/chat", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      message,
-      session_id: activeSessionId,
-      client_id: CLIENT_ID,
-    }),
-    signal,
-  });
-  if (!res.ok) {
-    let msg = "خطای سرور";
-    try { msg = (await res.json()).message || msg; } catch (_) {}
-    yield { event: "error", data: { message: msg, code: String(res.status) } };
-    return;
+  const controller = new AbortController();
+  const forward = () => controller.abort();
+  if (signal) {
+    if (signal.aborted) forward();
+    else signal.addEventListener("abort", forward);
   }
 
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
-    let sep;
-    while ((sep = buffer.indexOf("\n\n")) !== -1) {
-      const raw = buffer.slice(0, sep);
-      buffer = buffer.slice(sep + 2);
-      let event = "message", data = "";
-      for (const line of raw.split("\n")) {
-        if (line.startsWith("event:")) event = line.slice(6).trim();
-        else if (line.startsWith("data:")) data += line.slice(5).trim();
-      }
-      if (!data) continue;
-      try { yield { event, data: JSON.parse(data) }; }
-      catch (_) { console.warn("رویداد نامعتبر:", raw); }
+  let watchdog;
+  const arm = () => {
+    clearTimeout(watchdog);
+    watchdog = setTimeout(forward, STREAM_IDLE_TIMEOUT_MS);
+  };
+
+  try {
+    arm();
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message,
+        session_id: activeSessionId,
+        client_id: CLIENT_ID,
+      }),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      let msg = "خطای سرور";
+      try { msg = (await res.json()).message || msg; } catch (_) {}
+      yield { event: "error", data: { message: msg, code: String(res.status) } };
+      return;
     }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      arm();
+      buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+      let sep;
+      while ((sep = buffer.indexOf("\n\n")) !== -1) {
+        const raw = buffer.slice(0, sep);
+        buffer = buffer.slice(sep + 2);
+        let event = "message", data = "";
+        for (const line of raw.split("\n")) {
+          if (line.startsWith("event:")) event = line.slice(6).trim();
+          else if (line.startsWith("data:")) data += line.slice(5).trim();
+        }
+        if (!data) continue;
+        try { yield { event, data: JSON.parse(data) }; }
+        catch (_) { console.warn("رویداد نامعتبر:", raw); }
+      }
+    }
+  } finally {
+    clearTimeout(watchdog);
+    if (signal) signal.removeEventListener("abort", forward);
   }
 }
 
@@ -380,8 +406,19 @@ function renderSources(container, items) {
     ).join("");
 }
 
+function ensureSession() {
+  if (activeSessionId) return;
+  // بدون سشن فعال، ask بی‌صدا برمی‌گشت و کاربر فکر می‌کرد صفحه هنگ کرده.
+  activeSessionId = crypto.randomUUID();
+  draftSession = true;
+  localStorage.setItem(SESSION_KEY, activeSessionId);
+  renderSessionList();
+  syncNewChatButton();
+}
+
 async function ask(message) {
-  if (busy || !message.trim() || !activeSessionId) return;
+  if (busy || !message.trim()) return;
+  ensureSession();
   busy = true;
   sendEl.disabled = true;
   newChatEl.disabled = true;
@@ -421,6 +458,9 @@ async function ask(message) {
   } finally {
     busy = false;
     sendEl.disabled = false;
+    // بدون این، اگر refreshSessions موفق شود ولی چیزی عوض نشود، دکمه‌ی
+    // «گفتگوی جدید» از مرحله‌ی شروع ask غیرفعال مانده بود.
+    syncNewChatButton();
     try {
       await refreshSessions();
       const current = sessionItems.find(s => s.id === activeSessionId);
@@ -505,6 +545,14 @@ async function start() {
   } catch (error) {
     clearMessages();
     addMessage("سیستم").bubble.textContent = "بارگذاری تاریخچه ممکن نشد: " + error.message;
+    // مسیر واقعیِ خرابی: سشن ذخیره‌شده در لیست بود ولی GET آن ۴۰۴ داد
+    // (مثلاً بعد از deploy، چون sessions.db داخل کانتینر است و از بین
+    // می‌رود). آن‌وقت activeSessionId روی null می‌ماند و صفحه کاملاً
+    // بی‌جواب می‌شود. اینجا به یک گفتگوی سالم برمی‌گردیم.
+    activeSessionId = null;
+    draftSession = false;
+    localStorage.removeItem(SESSION_KEY);
+    ensureSession();
   }
   fetch("/health")
     .then(response => response.json())
