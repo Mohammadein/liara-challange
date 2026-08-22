@@ -265,6 +265,16 @@ async def ready():
         "llm_configured": settings.use_mock or settings.llm_configured,
         "index": settings.use_mock or _index_loaded(),
     }
+    # متادیتای ایندکسی که واقعاً داخل کانتینر است، در کنار مدلی که env
+    # می‌گوید. تنها راه دیدن اینکه deploy فایل‌های data/ را تازه کرده یا نه،
+    # بدون shell گرفتن روی کانتینر.
+    index_info: dict[str, object] = {"model_env": settings.model_embedding}
+    meta_path = Path(__file__).resolve().parent.parent / "data" / "index_meta.json"
+    try:
+        index_info["built"] = json.loads(meta_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        index_info["built"] = f"خوانده نشد: {type(exc).__name__}"
+
     is_ready = all(components.values())
     return JSONResponse(
         status_code=200 if is_ready else 503,
@@ -273,6 +283,7 @@ async def ready():
             "version": app.version,
             "mock": settings.use_mock,
             "components": components,
+            "index": index_info,
         },
     )
 

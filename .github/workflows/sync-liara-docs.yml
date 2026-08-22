@@ -13,6 +13,9 @@ on:
       - master
     paths:
       - "app/**"
+      # ingest/ اینجا نبود، پس تغییر خط لوله‌ی ساخت ایندکس دیپلوی را
+      # تریگر نمی‌کرد — در حالی که خروجی‌اش مستقیماً در ایمیج می‌رود.
+      - "ingest/**"
       - "static/**"
       - "Dockerfile"
       - "requirements.txt"
@@ -28,6 +31,12 @@ permissions:
 concurrency:
   group: liara-docs-production
   cancel-in-progress: false
+
+env:
+  # تنها منبع حقیقت برای مدل امبدینگ در CI. باید با MODEL_EMBEDDING روی
+  # پنل لیارا یکی باشد، وگرنه سرویس با ایندکس ناهماهنگ بالا می‌آید و
+  # app/retrieval.py عمداً بالا نمی‌آورَدش.
+  MODEL_EMBEDDING: ${{ vars.MODEL_EMBEDDING || 'google/gemini-embedding-001' }}
 
 jobs:
   sync-and-deploy:
@@ -72,9 +81,12 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: .cache
-          key: embeddings-v1-${{ hashFiles('docs/src/pages/**/*.mdx') }}
+          # مدل در کلید هست: بدون آن، عوض کردن مدل امبدینگ کش قبلی را
+          # restore می‌کرد، همه‌ی تکه‌ها hit می‌شدند، هیچ تماسی با API
+          # نمی‌رفت و ایندکسِ مدلِ قبلی با برچسب مدلِ جدید build می‌شد.
+          key: embeddings-v2-${{ env.MODEL_EMBEDDING }}-${{ hashFiles('docs/src/pages/**/*.mdx') }}
           restore-keys: |
-            embeddings-v1-
+            embeddings-v2-${{ env.MODEL_EMBEDDING }}-
 
       - name: Install Python dependencies
         if: steps.deployed.outputs.cache-hit != 'true' || inputs.force == true
@@ -87,7 +99,6 @@ jobs:
           USE_MOCK: "false"
           LIARA_AI_BASE_URL: ${{ secrets.LIARA_AI_BASE_URL }}
           LIARA_AI_API_KEY: ${{ secrets.LIARA_AI_API_KEY }}
-          MODEL_EMBEDDING: ${{ vars.MODEL_EMBEDDING || 'openai/text-embedding-3-small' }}
 
       - name: Validate generated indexes
         if: steps.deployed.outputs.cache-hit != 'true' || inputs.force == true
@@ -95,6 +106,7 @@ jobs:
         run: |
           python - <<'PY'
           import json
+          import os
           import pickle
           from pathlib import Path
 
@@ -113,7 +125,16 @@ jobs:
           if len(bm25.doc_freqs) != len(chunks):
               raise SystemExit("chunks.json and bm25.pkl are inconsistent")
 
-          print(f"Validated {len(chunks)} documentation chunks")
+          # این چک بود که نبودنش باعث شد ایندکسِ مدلِ قبلی از کش بیرون
+          # بیاید و بی‌سروصدا deploy شود.
+          expected = os.environ["MODEL_EMBEDDING"]
+          meta = json.loads((data / "index_meta.json").read_text(encoding="utf-8"))
+          if meta.get("model") != expected:
+              raise SystemExit(
+                  f"index built with {meta.get('model')} but MODEL_EMBEDDING is {expected}"
+              )
+
+          print(f"Validated {len(chunks)} chunks, dim={vectors.shape[1]}, model={expected}")
           PY
 
       # Persist embeddings before deployment so a deployment failure does not
