@@ -23,6 +23,13 @@ class Settings(BaseSettings):
     model_fast: str = "openai/gpt-4o-mini"        # بازنویسی کوئری، مسیریابی
     model_embedding: str = "openai/text-embedding-3-small"
 
+    # مدل‌های خانواده‌ی e5 / bge سند و سؤال را با پیشوند متفاوت امبد می‌کنند
+    # (`passage: ` و `query: `). اگر ingest پیشوند بزند و runtime نزند،
+    # بازیابی بی‌سروصدا افت می‌کند. پس هر دو از همین یک منبع می‌خوانند.
+    # برای مدل‌های OpenAI هر دو باید خالی بمانند.
+    embed_doc_prefix: str = ""
+    embed_query_prefix: str = ""
+
     # --- حالت اجرا ---
     # true = پاسخ ساختگی بدون تماس با LLM؛ برای کار موازی روی UI
     use_mock: bool = True

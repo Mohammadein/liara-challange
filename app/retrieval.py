@@ -116,6 +116,39 @@ class Retriever:
                 "python -m ingest.run_all را دوباره اجرا کنید."
             )
 
+        # ناسازگاری مدل امبدینگ هیچ استثنایی پرتاب نمی‌کند: بازیابی فقط
+        # نتایج بی‌ربط می‌دهد و مدل می‌گوید «در مستندات نیست». تنها راه
+        # دیدنش، مقایسه با متادیتای زمان ساخت است.
+        meta_path = data / "index_meta.json"
+        if meta_path.exists():
+            try:
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            except Exception:
+                meta = {}
+            built_with = meta.get("model")
+            if built_with and built_with != settings.model_embedding:
+                log.error(
+                    "ایندکس با مدل %s ساخته شده ولی MODEL_EMBEDDING الان %s است. "
+                    "بازیابی بی‌معنی خواهد بود — python -m ingest.run_all را "
+                    "با همین مدل دوباره اجرا کنید.",
+                    built_with, settings.model_embedding,
+                )
+            if meta.get("dim") and int(meta["dim"]) != int(vectors.shape[1]):
+                raise RuntimeError(
+                    f"ابعاد ناسازگار: meta={meta['dim']} ولی vectors={vectors.shape[1]}"
+                )
+            if meta.get("query_prefix", "") != settings.embed_query_prefix:
+                log.error(
+                    "پیشوند کوئری فرق دارد (ایندکس=%r، الان=%r) — "
+                    "EMBED_QUERY_PREFIX را هماهنگ کنید.",
+                    meta.get("query_prefix", ""), settings.embed_query_prefix,
+                )
+        else:
+            log.warning(
+                "data/index_meta.json نیست — نمی‌توان بررسی کرد ایندکس با "
+                "کدام مدل ساخته شده."
+            )
+
         log.info("index loaded: %d chunks, dim=%d", len(chunks), vectors.shape[1])
         return cls(chunks, vectors, bm25)
 

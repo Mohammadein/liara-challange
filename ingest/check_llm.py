@@ -18,13 +18,15 @@ from app.settings import settings
 
 def main() -> None:
     print(f"base_url : {settings.liara_ai_base_url}")
-    print(f"کلید     : {'تنظیم شده' if settings.liara_ai_api_key else '❌ خالی'}")
-    if not settings.liara_ai_api_key:
-        sys.exit("\nکلید در .env تنظیم نشده.")
+    # SecretStr همیشه truthy است و str() آن '**********' می‌دهد؛ هر دو
+    # اشتباه قبلی باعث می‌شد این اسکریپت با کلید ماسک‌شده تماس بگیرد.
+    print(f"کلید     : {'تنظیم شده' if settings.llm_configured else '❌ خالی'}")
+    if not settings.llm_configured:
+        sys.exit("\nLIARA_AI_API_KEY یا LIARA_AI_BASE_URL در .env تنظیم نشده.")
 
     client = OpenAI(
         base_url=settings.liara_ai_base_url,
-        api_key=settings.liara_ai_api_key,
+        api_key=settings.liara_ai_api_key_value,
         timeout=30,
     )
 

@@ -25,15 +25,16 @@ import numpy as np
 from openai import OpenAI
 
 from app.settings import settings
-from ingest.config import CACHE_DIR, VECTORS_FILE
+from ingest.config import CACHE_DIR, META_FILE, VECTORS_FILE
 from ingest.schema import Chunk
 
 BATCH_SIZE = 96
 MAX_RETRIES = 4
 
 # پیشوند مدل‌های خانواده e5 / bge. برای مدل‌های OpenAI بی‌اثر است.
-DOC_PREFIX = ""
-QUERY_PREFIX = ""
+# از settings می‌آید تا runtime و ingest نتوانند از هم جدا بیفتند.
+DOC_PREFIX = settings.embed_doc_prefix
+QUERY_PREFIX = settings.embed_query_prefix
 
 
 def _client() -> OpenAI:
@@ -144,6 +145,16 @@ def build_vectors(chunks: list[Chunk]) -> np.ndarray:
     vectors = embed_texts([c.embed_text for c in chunks])
     VECTORS_FILE.parent.mkdir(exist_ok=True)
     np.save(VECTORS_FILE, vectors)
+    META_FILE.write_text(
+        json.dumps({
+            "model": settings.model_embedding,
+            "dim": int(vectors.shape[1]),
+            "count": int(vectors.shape[0]),
+            "doc_prefix": DOC_PREFIX,
+            "query_prefix": QUERY_PREFIX,
+        }, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
     return vectors
 
 

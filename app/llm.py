@@ -108,7 +108,8 @@ def _embed_query_cached(text: str) -> tuple[float, ...]:
     """
     def call():
         resp = client().embeddings.create(
-            model=settings.model_embedding, input=[text]
+            model=settings.model_embedding,
+            input=[settings.embed_query_prefix + text],
         )
         if resp.usage:
             metrics.token_usage("embedding", resp.usage.total_tokens)

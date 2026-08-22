@@ -19,6 +19,9 @@ CACHE_DIR = ROOT / ".cache"
 CHUNKS_FILE = DATA_DIR / "chunks.json"
 VECTORS_FILE = DATA_DIR / "vectors.npy"
 BM25_FILE = DATA_DIR / "bm25.pkl"
+# با چه مدلی ساخته شده — تا runtime بتواند ناسازگاری را فریاد بزند
+# به‌جای اینکه نتایج بی‌ربط بدهد.
+META_FILE = DATA_DIR / "index_meta.json"
 
 DOCS_BASE_URL = "https://docs.liara.ir"
 
