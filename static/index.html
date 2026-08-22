@@ -634,7 +634,23 @@ body.right-panel-collapsed .right-rail{width:0;flex-basis:0;padding-left:0;paddi
   log.addEventListener("scroll", updateScrollState, {passive:true});
   scrollBtn.addEventListener("click", () => log.scrollTo({top:log.scrollHeight, behavior:"smooth"}));
 
+  // این callback خودش داخل `messages` تغییر می‌دهد و همان observer را
+  // دوباره تریگر می‌کند. حفاظ دوم در برابر همان حلقه: در حین اجرا
+  // ورودی مجدد را رد می‌کنیم و رکوردهای ناشی از تغییرات خودمان را دور
+  // می‌ریزیم تا بلافاصله دوباره صدا زده نشویم.
+  let decorating = false;
   const observer = new MutationObserver(() => {
+    if (decorating) return;
+    decorating = true;
+    try {
+      applyEnhancements();
+    } finally {
+      observer.takeRecords();
+      decorating = false;
+    }
+  });
+
+  function applyEnhancements() {
     messages.querySelectorAll(".msg").forEach(m => {
       if (!m.dataset.uiEnhanced) {
         m.dataset.uiEnhanced = "1";
@@ -658,7 +674,8 @@ body.right-panel-collapsed .right-rail{width:0;flex-basis:0;padding-left:0;paddi
     decorateSources();
     if (nearBottom) log.scrollTo({top:log.scrollHeight, behavior:"smooth"});
     updateScrollState();
-  });
+  }
+
   observer.observe(messages, {childList:true, subtree:true});
   decorateSources();
 
@@ -723,7 +740,11 @@ body.right-panel-collapsed .right-rail{width:0;flex-basis:0;padding-left:0;paddi
         });
       }
 
-      box.appendChild(toggle); // اگر منابع جدید بعداً اضافه شوند، دکمه همیشه در انتها بماند
+      // فقط وقتی واقعاً جابه‌جایی لازم است. appendChild بی‌قید و شرط، حتی
+      // روی عنصری که همین حالا آخرین فرزند است، یک mutation واقعی ثبت
+      // می‌کند — و چون MutationObserver پایین‌تر همین درخت را می‌بیند و
+      // همین تابع را صدا می‌زند، حلقه‌ی بی‌نهایت می‌ساخت و تب را قفل می‌کرد.
+      if (box.lastElementChild !== toggle) box.appendChild(toggle);
       if (!box.dataset.expanded) box.dataset.expanded = "false";
       applyVisibility();
     });
